@@ -1,8 +1,9 @@
 {
   "expo": {
-    "name": "shop24app",
+    "name": "Shop24",
     "slug": "shop24app",
     "version": "1.0.0",
+    "scheme": "shop24",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,8 +11,10 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.shop24.app",
+      "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -19,6 +22,22 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Shop24 needs access to your photos to search for products by image.",
+          "cameraPermission": "Shop24 needs access to your camera to search for products by image."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b13174dd-b5b4-4bb8-a80d-148678516db4"
+      }
     }
   }
 }
