@@ -16,7 +16,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Search, Camera, Bell, Percent, Award, ShieldCheck, RefreshCw } from 'lucide-react-native';
+import { Search, Camera, Bell, Award, ShieldCheck, Store } from 'lucide-react-native';
 import { COLORS, SPACING, FONTS, SHADOWS } from '../styles/theme';
 import { api } from '../services/api';
 import { useCart } from '../context/CartContext';
@@ -48,7 +48,7 @@ export default function HomeScreen({ navigation, route }) {
   const [hasMore, setHasMore] = useState(true);
   const [seed, setSeed] = useState(null);
   const loadingMoreRef = useRef(false);
-  const cycleRef = useRef(0); // bumped every reshuffle, keeps React keys unique across repeated product ids
+  const cycleRef = useRef(0); // strictly-incrementing counter, keeps every tagged product's React key unique
 
   // Rotating search suggestion state
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
@@ -57,9 +57,13 @@ export default function HomeScreen({ navigation, route }) {
   const flashListRef = useRef(null);
   const flashSlideIndexRef = useRef(0);
 
+  // Assigns every item a strictly-incrementing key so repeated product ids — across
+  // reshuffles, or an overlapping page from the backend's shuffle/pagination — never collide.
   const tagProducts = (list) => {
-    const cycle = cycleRef.current;
-    return list.map((p) => ({ ...p, _key: `${cycle}-${p.id}` }));
+    return list.map((p) => {
+      cycleRef.current += 1;
+      return { ...p, _key: `${cycleRef.current}-${p.id}` };
+    });
   };
 
   // Fetches page 1 of the feed and replaces whatever's currently loaded.
@@ -70,7 +74,6 @@ export default function HomeScreen({ navigation, route }) {
     const categorySlug = overrides.category !== undefined ? overrides.category : activeCategory;
     const isSearching = !!searchTerm.trim();
     const newSeed = isSearching ? null : Math.floor(Math.random() * 1000000);
-    cycleRef.current += 1;
 
     const result = await api.getProducts({
       search: searchTerm || undefined,
@@ -214,7 +217,6 @@ export default function HomeScreen({ navigation, route }) {
     setLoading(true);
     try {
       const matchedProducts = await api.searchByImage(`data:image/jpeg;base64,${result.assets[0].base64}`);
-      cycleRef.current += 1;
       setProducts(tagProducts(matchedProducts));
       setPage(1);
       setHasMore(false); // image search returns a fixed set of closest matches, not a real page
@@ -232,7 +234,6 @@ export default function HomeScreen({ navigation, route }) {
     try {
       const isSearching = !!searchQuery.trim();
       const newSeed = isSearching ? null : Math.floor(Math.random() * 1000000);
-      cycleRef.current += 1;
 
       const result = await api.getProducts({
         category: catSlug !== 'all' ? catSlug : undefined,
@@ -275,7 +276,6 @@ export default function HomeScreen({ navigation, route }) {
         setHasMore(result.hasMore);
       } else {
         const newSeed = Math.floor(Math.random() * 1000000);
-        cycleRef.current += 1;
         const result = await api.getProducts({
           category: activeCategory !== 'all' ? activeCategory : undefined,
           page: 1,
@@ -356,7 +356,7 @@ export default function HomeScreen({ navigation, route }) {
             onSubmitEditing={handleSearchSubmit}
           />
           <TouchableOpacity style={styles.cameraIcon} onPress={handleImageSearch}>
-            <Camera size={18} color={COLORS.textLight} />
+            <Camera size={15} color="#FFFFFF" />
           </TouchableOpacity>
           <TouchableOpacity style={styles.searchBlackBtn} onPress={handleSearchSubmit}>
             <Search size={15} color="#FFFFFF" strokeWidth={3} />
@@ -371,15 +371,31 @@ export default function HomeScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
-      {/* Temu Shipping Status Ribbon */}
-      <View style={styles.shippingBar}>
-        <View style={styles.shippingBarLeft}>
-          <Text style={styles.checkmarkIcon}>✓</Text>
-          <Text style={styles.shippingBarText}>Free shipping for you</Text>
+      {/* Top Categories row */}
+      {categories.length > 0 && (
+        <View style={styles.topCatBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.topCatContent}>
+            <Text style={styles.topCatLabel}>TOP CATEGORIES</Text>
+            {categories.map((cat) => (
+              <TouchableOpacity key={cat.id} onPress={() => handleCategoryPress(cat.slug)}>
+                <Text style={[styles.topCatItem, activeCategory === cat.slug && styles.topCatItemActive]}>
+                  {cat.name.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
-        <TouchableOpacity style={styles.shippingBarRight}>
-          <Text style={styles.shippingBarTextRight}>Limited-time offer  &gt;</Text>
-        </TouchableOpacity>
+      )}
+
+      {/* Shipping / Delivery split bar */}
+      <View style={styles.shippingBar}>
+        <View style={styles.shippingBarCol}>
+          <Text style={styles.shippingBarColText}>FREE SHIPPING FOR YOU</Text>
+        </View>
+        <View style={styles.shippingBarDivider} />
+        <View style={styles.shippingBarCol}>
+          <Text style={styles.shippingBarColText}>FAST DELIVERY</Text>
+        </View>
       </View>
 
       <ScrollView
@@ -420,6 +436,25 @@ export default function HomeScreen({ navigation, route }) {
             />
           </View>
         )}
+
+        {/* Trust / promo banner */}
+        <View style={styles.trustBanner}>
+          <View style={styles.trustBannerItem}>
+            <ShieldCheck size={16} color={COLORS.white} />
+            <Text style={styles.trustBannerText}>Buyer Protection</Text>
+          </View>
+          <View style={styles.trustBannerItem}>
+            <Award size={16} color={COLORS.white} />
+            <View>
+              <Text style={styles.trustBannerText}>Great Value</Text>
+              <Text style={styles.trustBannerSubText}>you can trust</Text>
+            </View>
+          </View>
+          <TouchableOpacity style={styles.trustBannerItem} onPress={() => navigation.navigate('BecomeSeller')}>
+            <Store size={16} color={COLORS.white} />
+            <Text style={styles.trustBannerText}>Become a Vendor</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Product Feed Grid - staggered masonry feed */}
         {loading ? (
@@ -479,8 +514,8 @@ const styles = StyleSheet.create({
     height: 38,
     paddingLeft: SPACING.md,
     paddingRight: 4,
-    borderWidth: 1,
-    borderColor: '#111111',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
   },
   searchInput: {
     flex: 1,
@@ -489,48 +524,68 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   cameraIcon: {
-    padding: 6,
-    marginRight: 2,
+    backgroundColor: COLORS.primary,
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
   },
   searchBlackBtn: {
-    backgroundColor: '#111111',
+    backgroundColor: COLORS.primary,
     width: 30,
     height: 30,
     borderRadius: 15,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  shippingBar: {
+  topCatBar: {
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  topCatContent: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: 8,
-    backgroundColor: COLORS.white,
+    paddingVertical: 10,
   },
-  shippingBarLeft: {
+  topCatLabel: {
+    fontSize: FONTS.size.xs,
+    fontWeight: FONTS.weight.heavy,
+    color: COLORS.text,
+    marginRight: SPACING.md,
+  },
+  topCatItem: {
+    fontSize: FONTS.size.xs,
+    fontWeight: '600',
+    color: COLORS.textLight,
+    marginRight: SPACING.md,
+  },
+  topCatItemActive: {
+    color: COLORS.primary,
+  },
+  shippingBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 10,
+    backgroundColor: COLORS.primaryLight,
   },
-  checkmarkIcon: {
-    color: '#2EA656',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginRight: 4,
+  shippingBarCol: {
+    flex: 1,
+    alignItems: 'center',
   },
-  shippingBarText: {
+  shippingBarColText: {
     color: COLORS.text,
     fontSize: 11,
     fontWeight: 'bold',
+    letterSpacing: 0.3,
   },
-  shippingBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  shippingBarTextRight: {
-    color: '#666666',
-    fontSize: 10,
-    fontWeight: '500',
+  shippingBarDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: COLORS.border,
   },
   cartButton: {
     padding: SPACING.xs,
@@ -670,6 +725,28 @@ const styles = StyleSheet.create({
     fontSize: FONTS.size.xs - 1,
     color: COLORS.textLight,
     marginTop: 4,
+  },
+  trustBanner: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.primary,
+    paddingVertical: 10,
+    paddingHorizontal: SPACING.sm,
+  },
+  trustBannerItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  trustBannerText: {
+    color: COLORS.white,
+    fontSize: FONTS.size.xs,
+    fontWeight: 'bold',
+  },
+  trustBannerSubText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 9,
   },
   recommendSection: {
     borderTopWidth: 8,

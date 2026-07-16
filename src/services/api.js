@@ -16,7 +16,11 @@ async function fetchWithTimeout(url, options = {}, timeout = 8000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, {
+      ...options,
+      headers: { Accept: 'application/json', ...options.headers },
+      signal: controller.signal,
+    });
     clearTimeout(id);
     return response;
   } catch (error) {

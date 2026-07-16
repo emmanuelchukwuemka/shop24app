@@ -24,24 +24,21 @@ export default function ProductCard({ product, matchFirstRowHeight }) {
       {/* Product image */}
       <View style={styles.imageContainer}>
         <FallbackImage uri={product.image_url} style={styles.image} />
+        <View style={styles.saleTag}>
+          <Text style={styles.saleTagText}>SALE</Text>
+        </View>
       </View>
 
       {/* Card info */}
       <View style={styles.info}>
-        {/* [🌸Sale] badge + title on same row */}
-        <View style={styles.titleRow}>
-          <View style={styles.saleBadge}>
-            <Text style={styles.saleBadgeText}>🌸Sale</Text>
-          </View>
-          <Text style={styles.title} numberOfLines={1}>{product.name}</Text>
-        </View>
+        <Text style={styles.title} numberOfLines={1}>{product.name}</Text>
 
         {/* Star seller purple badge (only top-rated). When matchFirstRowHeight is set,
             the slot is still reserved (invisible) so the first card in each masonry
             column lines up at the same height, without affecting any other card. */}
         {showBadgeSlot && (
           <View style={[styles.starSellerBadge, !isTopRated && styles.hiddenBadge]}>
-            <Text style={styles.starSellerText}>⭐ Star seller</Text>
+            <Text style={styles.starSellerText}>STAR SELLER</Text>
           </View>
         )}
 
@@ -76,58 +73,51 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     width: '100%',
-    aspectRatio: 1,
+    aspectRatio: 1.2,
     backgroundColor: '#F5F5F7',
+    position: 'relative',
   },
   image: {
     width: '100%',
     height: '100%',
   },
+  saleTag: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 2,
+  },
+  saleTagText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: FONTS.weight.heavy,
+    letterSpacing: 0.5,
+  },
   info: {
     padding: 6,
     backgroundColor: '#FFFFFF',
   },
-
-  /* Title row: badge + name */
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 3,
-  },
-  saleBadge: {
-    borderWidth: 0.8,
-    borderColor: '#FFFFFF',
-    borderRadius: 2,
-    paddingHorizontal: 3,
-    paddingVertical: 1,
-    marginRight: 4,
-    marginTop: 1,
-    flexShrink: 0,
-  },
-  saleBadgeText: {
-    color: COLORS.primary,
-    fontSize: 8,
-    fontWeight: 'bold',
-    lineHeight: 10,
-  },
   title: {
-    flex: 1,
     fontSize: 11,
     color: '#222222',
     lineHeight: 15,
+    marginBottom: 3,
   },
 
   /* Star seller badge */
   starSellerBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#F5ECFF',
+    backgroundColor: '#FDF3D9',
     borderRadius: 2,
     paddingHorizontal: 4,
     paddingVertical: 1,
     marginBottom: 3,
   },
   starSellerText: {
-    color: '#7000FF',
+    color: '#8B6D1F',
     fontSize: 8,
     fontWeight: 'bold',
   },

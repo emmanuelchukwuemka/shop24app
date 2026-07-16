@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Animated, Easing, StyleSheet } from 'react-native';
 
-// A calmer, on-brand loading state — a gently pulsing logo instead of a bare spinner.
+// A calmer, on-brand loading state — a gently breathing logo (fade + scale) instead of a bare spinner.
 export default function LoadingLogo({ size = 64 }) {
   const pulse = useRef(new Animated.Value(0.4)).current;
 
@@ -26,12 +26,17 @@ export default function LoadingLogo({ size = 64 }) {
     return () => loop.stop();
   }, [pulse]);
 
+  const scale = pulse.interpolate({
+    inputRange: [0.4, 1],
+    outputRange: [0.88, 1.05],
+  });
+
   return (
     <View style={styles.container}>
       <Animated.Image
         source={require('../../assets/logo.png')}
         resizeMode="contain"
-        style={{ width: size, height: size, opacity: pulse }}
+        style={{ width: size, height: size, opacity: pulse, transform: [{ scale }] }}
       />
     </View>
   );

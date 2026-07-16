@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Image, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Image, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Search, User, ShoppingCart } from 'lucide-react-native';
 import { COLORS } from '../styles/theme';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 
 // Main Screens
 import HomeScreen from '../screens/HomeScreen';
@@ -33,6 +34,8 @@ const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 function TabNavigator() {
+  const { cartCount } = useCart();
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -89,7 +92,16 @@ function TabNavigator() {
         component={CartScreen}
         options={{
           tabBarLabel: 'Cart',
-          tabBarIcon: ({ color }) => <ShoppingCart size={22} color={color} />,
+          tabBarIcon: ({ color }) => (
+            <View style={{ position: 'relative' }}>
+              <ShoppingCart size={22} color={color} />
+              {cartCount > 0 && (
+                <View style={tabStyles.cartBadge}>
+                  <Text style={tabStyles.cartBadgeText}>{cartCount > 99 ? '99+' : cartCount}</Text>
+                </View>
+              )}
+            </View>
+          ),
         }}
       />
       <Tab.Screen
@@ -169,5 +181,22 @@ const tabStyles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: COLORS.primary,
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    backgroundColor: COLORS.primary,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  cartBadgeText: {
+    color: COLORS.white,
+    fontSize: 9,
+    fontWeight: 'bold',
   },
 });
