@@ -24,14 +24,16 @@ export default function ProductCard({ product, matchFirstRowHeight }) {
       {/* Product image */}
       <View style={styles.imageContainer}>
         <FallbackImage uri={product.image_url} style={styles.image} />
-        <View style={styles.saleTag}>
-          <Text style={styles.saleTagText}>SALE</Text>
-        </View>
       </View>
 
       {/* Card info */}
       <View style={styles.info}>
-        <Text style={styles.title} numberOfLines={1}>{product.name}</Text>
+        <View style={styles.titleRow}>
+          <View style={styles.saleTag}>
+            <Text style={styles.saleTagText}>SALE</Text>
+          </View>
+          <Text style={styles.title} numberOfLines={1}>{product.name}</Text>
+        </View>
 
         {/* Star seller purple badge (only top-rated). When matchFirstRowHeight is set,
             the slot is still reserved (invisible) so the first card in each masonry
@@ -82,17 +84,15 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   saleTag: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
     backgroundColor: COLORS.primary,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
     borderRadius: 2,
+    marginRight: 4,
   },
   saleTagText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: FONTS.weight.heavy,
     letterSpacing: 0.5,
   },
@@ -100,11 +100,16 @@ const styles = StyleSheet.create({
     padding: 6,
     backgroundColor: '#FFFFFF',
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 3,
+  },
   title: {
+    flex: 1,
     fontSize: 11,
     color: '#222222',
     lineHeight: 15,
-    marginBottom: 3,
   },
 
   /* Star seller badge */

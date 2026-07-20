@@ -78,6 +78,12 @@ export const api = {
     return await response.json();
   },
 
+  getCuratedSet: async () => {
+    const response = await fetchWithTimeout(`${BASE_URL}/curated-sets`);
+    if (!response.ok) throw new Error(`getCuratedSet failed: ${response.status}`);
+    return await response.json();
+  },
+
   getTrendingKeywords: async () => {
     const response = await fetchWithTimeout(`${BASE_URL}/search-trending`);
     if (!response.ok) throw new Error(`getTrendingKeywords failed: ${response.status}`);

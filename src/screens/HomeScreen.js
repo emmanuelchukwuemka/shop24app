@@ -25,8 +25,12 @@ import CountdownTimer from '../components/CountdownTimer';
 import LoadingLogo from '../components/LoadingLogo';
 import FallbackImage from '../components/FallbackImage';
 
-const { height: windowHeight } = Dimensions.get('window');
-const FLASH_ITEM_WIDTH = 160; // flashItem width (152) + marginRight (SPACING.sm)
+const { width: windowWidth, height: windowHeight } = Dimensions.get('window');
+// Sized so 2 sliding Flash Sale cards + 1 static Curated Set card all fit on screen at once,
+// with SPACING.md padding on each side and SPACING.sm gaps between the 3 cards.
+const DEALS_CARD_WIDTH = Math.floor((windowWidth - SPACING.md * 2 - SPACING.sm * 2) / 3);
+const DEALS_CARD_IMAGE_HEIGHT = Math.round(DEALS_CARD_WIDTH * (136 / 152));
+const FLASH_ITEM_WIDTH = DEALS_CARD_WIDTH + SPACING.sm; // card width + its own marginRight
 
 export default function HomeScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
@@ -35,6 +39,7 @@ export default function HomeScreen({ navigation, route }) {
   // State variables
   const [categories, setCategories] = useState([]);
   const [flashSales, setFlashSales] = useState([]);
+  const [curatedSet, setCuratedSet] = useState([]);
   const [products, setProducts] = useState([]);
   const [trendingKeywords, setTrendingKeywords] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -139,15 +144,17 @@ export default function HomeScreen({ navigation, route }) {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [categoriesData, flashData, keywords] = await Promise.all([
+      const [categoriesData, flashData, curatedData, keywords] = await Promise.all([
         api.getCategories().catch(() => []),
         api.getFlashSales().catch(() => []),
+        api.getCuratedSet().catch(() => []),
         api.getTrendingKeywords().catch(() => []),
         loadFirstPage().catch(() => {}),
       ]);
 
       setCategories(categoriesData);
       setFlashSales(flashData);
+      setCuratedSet(curatedData);
       setTrendingKeywords(keywords);
     } catch (e) {
       console.error('[HomeScreen] loadData error:', e);
@@ -169,7 +176,8 @@ export default function HomeScreen({ navigation, route }) {
     return () => clearInterval(interval);
   }, [trendingKeywords]);
 
-  // Auto-slide the Flash Sale carousel every few seconds, looping back to the start
+  // Auto-slide the Flash Sale carousel every few seconds, looping back to the start.
+  // Curated Set is intentionally not part of this — it's a fixed card, not slid.
   useEffect(() => {
     if (flashSales.length <= 1) return;
     flashSlideIndexRef.current = 0;
@@ -302,7 +310,7 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
-  // Render Horizontal Flash Sale Item
+  // Render Horizontal Flash Sale Item — the sliding part of the row
   const renderFlashSaleItem = ({ item }) => {
     const flashPrice = Number(item.flash_price);
     const originalPrice = Number(item.product.price);
@@ -335,6 +343,29 @@ export default function HomeScreen({ navigation, route }) {
       </TouchableOpacity>
     );
   };
+
+  // Render the fixed, non-sliding Curated Set card — always visible, doesn't scroll with Flash Sale
+  const renderCuratedCard = (item) => (
+    <TouchableOpacity
+      style={styles.flashItem}
+      activeOpacity={0.85}
+      onPress={() => navigation.navigate('ProductDetails', { productId: item.product.id })}
+    >
+      <View style={styles.flashItemImageWrap}>
+        <FallbackImage uri={item.product.image_url} style={styles.flashItemImage} />
+        <View style={styles.curatedTag}>
+          <Text style={styles.flashDiscountText}>Curated Set</Text>
+        </View>
+      </View>
+      <Text style={styles.flashItemName} numberOfLines={1}>{item.product.name}</Text>
+      <View style={styles.flashPriceRow}>
+        <Text style={styles.flashPrice}>₦{Number(item.product.price).toLocaleString()}</Text>
+      </View>
+      {item.product.sales_count > 0 && (
+        <Text style={styles.flashSoldText}>🔥 {item.product.sales_count} sold</Text>
+      )}
+    </TouchableOpacity>
+  );
 
   const nextFlashSaleEnd = flashSales.length > 0
     ? flashSales.reduce((soonest, s) => (
@@ -406,34 +437,45 @@ export default function HomeScreen({ navigation, route }) {
         onScroll={handleScroll}
         scrollEventThrottle={200}
       >
-        {/* Flash Sales carousel */}
-        {flashSales.length > 0 && (
+        {/* Flash Sale (sliding) + Curated Set (fixed card) — side by side in one row */}
+        {(flashSales.length > 0 || curatedSet.length > 0) && (
           <View style={styles.sectionContainer}>
             <View style={styles.sectionHeader}>
               <View style={styles.dealsTitleContainer}>
-                <Text style={styles.dealsTitle}>⚡ Flash Sale</Text>
+                <Text style={styles.dealsTitle}>{flashSales.length > 0 ? '⚡ Flash Sale' : '✨ Curated Set'}</Text>
               </View>
               {nextFlashSaleEnd && <CountdownTimer endTime={nextFlashSaleEnd} />}
             </View>
-            <FlatList
-              ref={flashListRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              data={flashSales}
-              keyExtractor={(item) => String(item.id)}
-              renderItem={renderFlashSaleItem}
-              contentContainerStyle={styles.dealsList}
-              getItemLayout={(data, index) => ({
-                length: FLASH_ITEM_WIDTH,
-                offset: FLASH_ITEM_WIDTH * index,
-                index,
-              })}
-              onScrollToIndexFailed={(info) => {
-                setTimeout(() => {
-                  flashListRef.current?.scrollToIndex({ index: info.index, animated: true });
-                }, 100);
-              }}
-            />
+            <View style={styles.dealsRow}>
+              {flashSales.length > 0 && (
+                <View style={styles.flashSliderWrap}>
+                  <FlatList
+                    ref={flashListRef}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    data={flashSales}
+                    keyExtractor={(item) => String(item.id)}
+                    renderItem={renderFlashSaleItem}
+                    contentContainerStyle={styles.dealsList}
+                    getItemLayout={(data, index) => ({
+                      length: FLASH_ITEM_WIDTH,
+                      offset: FLASH_ITEM_WIDTH * index,
+                      index,
+                    })}
+                    onScrollToIndexFailed={(info) => {
+                      setTimeout(() => {
+                        flashListRef.current?.scrollToIndex({ index: info.index, animated: true });
+                      }, 100);
+                    }}
+                  />
+                </View>
+              )}
+              {curatedSet.length > 0 && (
+                <View style={flashSales.length === 0 ? styles.dealsList : null}>
+                  {renderCuratedCard(curatedSet[0])}
+                </View>
+              )}
+            </View>
           </View>
         )}
 
@@ -667,12 +709,20 @@ const styles = StyleSheet.create({
   dealsList: {
     paddingLeft: SPACING.md,
   },
+  dealsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  flashSliderWrap: {
+    width: FLASH_ITEM_WIDTH * 2,
+    overflow: 'hidden',
+  },
   flashItem: {
     backgroundColor: COLORS.card,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
-    width: 152,
+    width: DEALS_CARD_WIDTH,
     padding: 8,
     marginRight: SPACING.sm,
     ...SHADOWS.light,
@@ -682,7 +732,7 @@ const styles = StyleSheet.create({
   },
   flashItemImage: {
     width: '100%',
-    height: 136,
+    height: DEALS_CARD_IMAGE_HEIGHT,
     borderRadius: 8,
   },
   flashDiscountTag: {
@@ -698,6 +748,15 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontSize: 10,
     fontWeight: 'bold',
+  },
+  curatedTag: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    backgroundColor: COLORS.secondary,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
   },
   flashItemName: {
     fontSize: FONTS.size.xs + 1,
