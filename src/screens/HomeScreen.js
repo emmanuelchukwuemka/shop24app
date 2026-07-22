@@ -11,7 +11,9 @@ import {
   RefreshControl,
   Dimensions,
   Alert,
-  BackHandler
+  BackHandler,
+  Linking,
+  Image
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,7 +31,7 @@ const { width: windowWidth, height: windowHeight } = Dimensions.get('window');
 // Sized so 2 sliding Flash Sale cards + 1 static Curated Set card all fit on screen at once,
 // with SPACING.md padding on each side and SPACING.sm gaps between the 3 cards.
 const DEALS_CARD_WIDTH = Math.floor((windowWidth - SPACING.md * 2 - SPACING.sm * 2) / 3);
-const DEALS_CARD_IMAGE_HEIGHT = Math.round(DEALS_CARD_WIDTH * (136 / 152));
+const DEALS_CARD_IMAGE_HEIGHT = Math.round(DEALS_CARD_WIDTH * 1.15);
 const FLASH_ITEM_WIDTH = DEALS_CARD_WIDTH + SPACING.sm; // card width + its own marginRight
 
 export default function HomeScreen({ navigation, route }) {
@@ -38,6 +40,7 @@ export default function HomeScreen({ navigation, route }) {
   
   // State variables
   const [categories, setCategories] = useState([]);
+  const [banners, setBanners] = useState([]);
   const [flashSales, setFlashSales] = useState([]);
   const [curatedSet, setCuratedSet] = useState([]);
   const [products, setProducts] = useState([]);
@@ -61,6 +64,10 @@ export default function HomeScreen({ navigation, route }) {
   // Auto-sliding Flash Sale carousel
   const flashListRef = useRef(null);
   const flashSlideIndexRef = useRef(0);
+
+  // Auto-sliding banner carousel (advert banners, admin-controlled)
+  const bannerListRef = useRef(null);
+  const bannerSlideIndexRef = useRef(0);
 
   // Assigns every item a strictly-incrementing key so repeated product ids — across
   // reshuffles, or an overlapping page from the backend's shuffle/pagination — never collide.
@@ -144,8 +151,9 @@ export default function HomeScreen({ navigation, route }) {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [categoriesData, flashData, curatedData, keywords] = await Promise.all([
+      const [categoriesData, bannersData, flashData, curatedData, keywords] = await Promise.all([
         api.getCategories().catch(() => []),
+        api.getBanners().catch(() => []),
         api.getFlashSales().catch(() => []),
         api.getCuratedSet().catch(() => []),
         api.getTrendingKeywords().catch(() => []),
@@ -153,6 +161,7 @@ export default function HomeScreen({ navigation, route }) {
       ]);
 
       setCategories(categoriesData);
+      setBanners(bannersData);
       setFlashSales(flashData);
       setCuratedSet(curatedData);
       setTrendingKeywords(keywords);
@@ -187,6 +196,17 @@ export default function HomeScreen({ navigation, route }) {
     }, 3000);
     return () => clearInterval(interval);
   }, [flashSales]);
+
+  // Auto-slide the advert banner carousel every few seconds, looping back to the start
+  useEffect(() => {
+    if (banners.length <= 1) return;
+    bannerSlideIndexRef.current = 0;
+    const interval = setInterval(() => {
+      bannerSlideIndexRef.current = (bannerSlideIndexRef.current + 1) % banners.length;
+      bannerListRef.current?.scrollToIndex({ index: bannerSlideIndexRef.current, animated: true });
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [banners]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -310,6 +330,58 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
+  const handleBannerPress = (item) => {
+    if (item.button_url && /^https?:\/\//i.test(item.button_url)) {
+      Linking.openURL(item.button_url).catch(() => {});
+    }
+  };
+
+  // Render one advert banner — a plain uploaded image if admin set one, otherwise the
+  // colored title/subtitle/polaroid card layout the Banner model also supports.
+  const renderBannerItem = ({ item }) => {
+    const imageUri = api.resolveMediaUrl(item.image_path);
+
+    if (imageUri) {
+      return (
+        <TouchableOpacity activeOpacity={0.9} onPress={() => handleBannerPress(item)}>
+          <Image source={{ uri: imageUri }} style={styles.bannerImage} resizeMode="cover" />
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => handleBannerPress(item)}
+        style={[styles.bannerCard, { backgroundColor: item.background_color || COLORS.primary }]}
+      >
+        <View style={styles.bannerCardText}>
+          {!!item.title && <Text style={styles.bannerCardTitle}>{item.title}</Text>}
+          {!!item.subtitle && <Text style={styles.bannerCardSubtitle}>{item.subtitle}</Text>}
+          {!!item.button_text && (
+            <View style={styles.bannerCardButton}>
+              <Text style={styles.bannerCardButtonText}>{item.button_text}</Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.bannerPolaroids}>
+          {!!item.polaroid_1_image && (
+            <View style={styles.polaroid}>
+              <FallbackImage uri={item.polaroid_1_image} style={styles.polaroidImage} />
+              {!!item.polaroid_1_price && <Text style={styles.polaroidPrice}>{item.polaroid_1_price}</Text>}
+            </View>
+          )}
+          {!!item.polaroid_2_image && (
+            <View style={[styles.polaroid, styles.polaroidOffset]}>
+              <FallbackImage uri={item.polaroid_2_image} style={styles.polaroidImage} />
+              {!!item.polaroid_2_price && <Text style={styles.polaroidPrice}>{item.polaroid_2_price}</Text>}
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   // Render Horizontal Flash Sale Item — the sliding part of the row
   const renderFlashSaleItem = ({ item }) => {
     const flashPrice = Number(item.flash_price);
@@ -333,10 +405,6 @@ export default function HomeScreen({ navigation, route }) {
           )}
         </View>
         <Text style={styles.flashItemName} numberOfLines={1}>{item.product.name}</Text>
-        <View style={styles.flashPriceRow}>
-          <Text style={styles.flashPrice}>₦{flashPrice.toLocaleString()}</Text>
-          <Text style={styles.flashOldPrice}>₦{originalPrice.toLocaleString()}</Text>
-        </View>
         {item.product.sales_count > 0 && (
           <Text style={styles.flashSoldText}>🔥 {item.product.sales_count} sold</Text>
         )}
@@ -358,9 +426,6 @@ export default function HomeScreen({ navigation, route }) {
         </View>
       </View>
       <Text style={styles.flashItemName} numberOfLines={1}>{item.product.name}</Text>
-      <View style={styles.flashPriceRow}>
-        <Text style={styles.flashPrice}>₦{Number(item.product.price).toLocaleString()}</Text>
-      </View>
       {item.product.sales_count > 0 && (
         <Text style={styles.flashSoldText}>🔥 {item.product.sales_count} sold</Text>
       )}
@@ -387,10 +452,10 @@ export default function HomeScreen({ navigation, route }) {
             onSubmitEditing={handleSearchSubmit}
           />
           <TouchableOpacity style={styles.cameraIcon} onPress={handleImageSearch}>
-            <Camera size={15} color="#FFFFFF" />
+            <Camera size={15} color={COLORS.primary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.searchBlackBtn} onPress={handleSearchSubmit}>
-            <Search size={15} color="#FFFFFF" strokeWidth={3} />
+            <Search size={15} color={COLORS.primary} strokeWidth={3} />
           </TouchableOpacity>
         </View>
         
@@ -437,6 +502,29 @@ export default function HomeScreen({ navigation, route }) {
         onScroll={handleScroll}
         scrollEventThrottle={200}
       >
+        {/* Advert banners — admin-controlled, full-width image or colored promo card */}
+        {banners.length > 0 && (
+          <FlatList
+            ref={bannerListRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            data={banners}
+            keyExtractor={(item) => String(item.id)}
+            renderItem={renderBannerItem}
+            getItemLayout={(data, index) => ({
+              length: windowWidth,
+              offset: windowWidth * index,
+              index,
+            })}
+            onScrollToIndexFailed={(info) => {
+              setTimeout(() => {
+                bannerListRef.current?.scrollToIndex({ index: info.index, animated: true });
+              }, 100);
+            }}
+          />
+        )}
+
         {/* Flash Sale (sliding) + Curated Set (fixed card) — side by side in one row */}
         {(flashSales.length > 0 || curatedSet.length > 0) && (
           <View style={styles.sectionContainer}>
@@ -543,7 +631,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: SPACING.sm,
     paddingVertical: SPACING.sm,
     backgroundColor: COLORS.white,
   },
@@ -552,12 +640,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.white,
-    borderRadius: 24,
-    height: 38,
+    borderRadius: 20,
+    height: 34,
     paddingLeft: SPACING.md,
     paddingRight: 4,
     borderWidth: 1.5,
-    borderColor: COLORS.primary,
+    borderColor: COLORS.black,
   },
   searchInput: {
     flex: 1,
@@ -566,19 +654,19 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   cameraIcon: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.primaryLight,
     width: 26,
     height: 26,
-    borderRadius: 6,
+    borderRadius: 4,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 4,
   },
   searchBlackBtn: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.primaryLight,
     width: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -629,9 +717,73 @@ const styles = StyleSheet.create({
     height: 16,
     backgroundColor: COLORS.border,
   },
+  bannerImage: {
+    width: windowWidth,
+    height: windowWidth * 0.45,
+  },
+  bannerCard: {
+    width: windowWidth,
+    height: windowWidth * 0.45,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.lg,
+    overflow: 'hidden',
+  },
+  bannerCardText: {
+    flex: 1,
+  },
+  bannerCardTitle: {
+    fontSize: FONTS.size.xxl,
+    fontWeight: FONTS.weight.heavy,
+    color: COLORS.white,
+  },
+  bannerCardSubtitle: {
+    fontSize: FONTS.size.md,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 2,
+    marginBottom: SPACING.sm,
+  },
+  bannerCardButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  bannerCardButtonText: {
+    fontSize: FONTS.size.sm,
+    fontWeight: FONTS.weight.bold,
+    color: COLORS.text,
+  },
+  bannerPolaroids: {
+    flexDirection: 'row',
+  },
+  polaroid: {
+    width: 80,
+    backgroundColor: COLORS.white,
+    borderRadius: 6,
+    padding: 4,
+    ...SHADOWS.medium,
+  },
+  polaroidOffset: {
+    marginLeft: -16,
+    marginTop: 16,
+  },
+  polaroidImage: {
+    width: '100%',
+    height: 70,
+    borderRadius: 4,
+  },
+  polaroidPrice: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    textAlign: 'center',
+    marginTop: 2,
+  },
   cartButton: {
     padding: SPACING.xs,
-    marginLeft: SPACING.sm,
+    marginLeft: SPACING.xs,
     position: 'relative',
   },
   highlightsContainer: {

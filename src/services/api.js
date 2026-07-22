@@ -1,4 +1,5 @@
 const BASE_URL = 'https://myshop24.ng/api/m';
+const ORIGIN_URL = BASE_URL.replace(/\/api\/m$/, '');
 
 let _authToken = null;
 
@@ -31,6 +32,14 @@ async function fetchWithTimeout(url, options = {}, timeout = 8000) {
 
 export const api = {
   getActiveUrl: () => BASE_URL,
+
+  // Banner image_path values come back as server-relative paths (e.g. "/uploads/banner_123.jpg")
+  // when uploaded via the admin's custom_graphic field — resolve them against the site origin.
+  resolveMediaUrl: (path) => {
+    if (!path) return null;
+    if (/^https?:\/\//i.test(path)) return path;
+    return `${ORIGIN_URL}${path}`;
+  },
 
   getBanners: async () => {
     const response = await fetchWithTimeout(`${BASE_URL}/banners`);
