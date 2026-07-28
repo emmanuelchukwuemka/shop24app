@@ -1,23 +1,49 @@
-import React from 'react';
-import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, Modal, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { ShoppingCart } from 'lucide-react-native';
+import { ShoppingCart, X } from 'lucide-react-native';
 import { COLORS, SPACING, FONTS } from '../styles/theme';
 import { useCart } from '../context/CartContext';
 import FallbackImage from './FallbackImage';
 
+const variantLabel = (v) => [v.color, v.size].filter(Boolean).join(' / ') || `Option ${v.id}`;
+
 export default function ProductCard({ product, matchFirstRowHeight }) {
   const navigation = useNavigation();
   const { addToCart, getDiscountedPrice } = useCart();
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   const discountedPrice = getDiscountedPrice(product);
   const isTopRated = (product.rating || 4.5) >= 4.8;
   const showBadgeSlot = isTopRated || matchFirstRowHeight;
+  const variants = product.variants || [];
 
   const formattedSales =
     product.sales_count >= 1000
       ? `${(product.sales_count / 1000).toFixed(0)}K+`
       : String(product.sales_count || 0);
+
+  const addWithVariant = (variant) => ({
+    ...product,
+    price: variant?.price ?? product.price,
+    variant_id: variant?.id ?? null,
+    variant_label: variant ? variantLabel(variant) : null,
+  });
+
+  const handleQuickAdd = (e) => {
+    e.stopPropagation();
+    if (variants.length > 1) {
+      setPickerVisible(true);
+      return;
+    }
+    addToCart(addWithVariant(variants[0]), 1);
+  };
+
+  const handlePickVariant = (variant) => {
+    setPickerVisible(false);
+    if (variant.stock <= 0) return;
+    addToCart(addWithVariant(variant), 1);
+  };
 
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={() => navigation.navigate('ProductDetails', { productId: product.id })}>
@@ -54,13 +80,44 @@ export default function ProductCard({ product, matchFirstRowHeight }) {
           </View>
           <TouchableOpacity
             style={styles.cartBtn}
-            onPress={(e) => { e.stopPropagation(); addToCart(product, 1); }}
+            onPress={handleQuickAdd}
             activeOpacity={0.7}
           >
             <ShoppingCart size={13} color={COLORS.text} strokeWidth={2} />
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Variant picker — only shown when this product has more than one variant,
+          so quick-add from the grid never silently ignores color/size options. */}
+      <Modal visible={pickerVisible} transparent animationType="fade" onRequestClose={() => setPickerVisible(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPickerVisible(false)}>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle} numberOfLines={1}>{product.name}</Text>
+              <TouchableOpacity onPress={() => setPickerVisible(false)}>
+                <X size={18} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={variants}
+              keyExtractor={(v) => String(v.id)}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.variantRow, item.stock <= 0 && styles.variantRowDisabled]}
+                  onPress={() => handlePickVariant(item)}
+                  disabled={item.stock <= 0}
+                >
+                  <Text style={styles.variantRowText}>{variantLabel(item)}</Text>
+                  <Text style={item.stock <= 0 ? styles.variantOutOfStock : styles.variantPrice}>
+                    {item.stock <= 0 ? 'Out of stock' : `₦${Number(item.price ?? product.price).toLocaleString()}`}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </TouchableOpacity>
   );
 }
@@ -162,5 +219,58 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 4,
+  },
+
+  /* Variant picker modal */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.xl,
+    maxHeight: '60%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.sm,
+  },
+  modalTitle: {
+    flex: 1,
+    fontSize: FONTS.size.md,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginRight: SPACING.sm,
+  },
+  variantRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  variantRowDisabled: {
+    opacity: 0.4,
+  },
+  variantRowText: {
+    fontSize: FONTS.size.sm,
+    color: COLORS.text,
+  },
+  variantPrice: {
+    fontSize: FONTS.size.sm,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  variantOutOfStock: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.textMuted,
   },
 });

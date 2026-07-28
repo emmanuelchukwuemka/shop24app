@@ -331,7 +331,9 @@ export default function HomeScreen({ navigation, route }) {
   };
 
   const handleBannerPress = (item) => {
-    if (item.button_url && /^https?:\/\//i.test(item.button_url)) {
+    if (item.product_id) {
+      navigation.navigate('ProductDetails', { productId: item.product_id });
+    } else if (item.button_url && /^https?:\/\//i.test(item.button_url)) {
       Linking.openURL(item.button_url).catch(() => {});
     }
   };
@@ -345,6 +347,11 @@ export default function HomeScreen({ navigation, route }) {
       return (
         <TouchableOpacity activeOpacity={0.9} onPress={() => handleBannerPress(item)}>
           <Image source={{ uri: imageUri }} style={styles.bannerImage} resizeMode="cover" />
+          {!!item.product_id && (
+            <View style={styles.bannerShopNowBtn}>
+              <Text style={styles.bannerShopNowText}>Shop Now ›</Text>
+            </View>
+          )}
         </TouchableOpacity>
       );
     }
@@ -358,9 +365,9 @@ export default function HomeScreen({ navigation, route }) {
         <View style={styles.bannerCardText}>
           {!!item.title && <Text style={styles.bannerCardTitle}>{item.title}</Text>}
           {!!item.subtitle && <Text style={styles.bannerCardSubtitle}>{item.subtitle}</Text>}
-          {!!item.button_text && (
+          {(!!item.button_text || !!item.product_id) && (
             <View style={styles.bannerCardButton}>
-              <Text style={styles.bannerCardButtonText}>{item.button_text}</Text>
+              <Text style={styles.bannerCardButtonText}>{item.button_text || 'Shop now'}</Text>
             </View>
           )}
         </View>
@@ -452,10 +459,10 @@ export default function HomeScreen({ navigation, route }) {
             onSubmitEditing={handleSearchSubmit}
           />
           <TouchableOpacity style={styles.cameraIcon} onPress={handleImageSearch}>
-            <Camera size={15} color={COLORS.primary} />
+            <Camera size={17} color={COLORS.black} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.searchBlackBtn} onPress={handleSearchSubmit}>
-            <Search size={15} color={COLORS.primary} strokeWidth={3} />
+            <Search size={15} color={COLORS.white} strokeWidth={3} />
           </TouchableOpacity>
         </View>
         
@@ -640,11 +647,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.white,
-    borderRadius: 20,
-    height: 34,
+    borderRadius: 22,
+    height: 40,
     paddingLeft: SPACING.md,
     paddingRight: 4,
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: COLORS.black,
   },
   searchInput: {
@@ -654,19 +661,17 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   cameraIcon: {
-    backgroundColor: COLORS.primaryLight,
-    width: 26,
-    height: 26,
-    borderRadius: 4,
+    width: 28,
+    height: 28,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 4,
   },
   searchBlackBtn: {
-    backgroundColor: COLORS.primaryLight,
-    width: 30,
-    height: 30,
-    borderRadius: 8,
+    backgroundColor: COLORS.black,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -720,6 +725,21 @@ const styles = StyleSheet.create({
   bannerImage: {
     width: windowWidth,
     height: windowWidth * 0.45,
+  },
+  bannerShopNowBtn: {
+    position: 'absolute',
+    left: SPACING.lg,
+    bottom: SPACING.lg,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 6,
+    borderRadius: 16,
+    ...SHADOWS.medium,
+  },
+  bannerShopNowText: {
+    fontSize: FONTS.size.sm,
+    fontWeight: FONTS.weight.bold,
+    color: COLORS.text,
   },
   bannerCard: {
     width: windowWidth,
