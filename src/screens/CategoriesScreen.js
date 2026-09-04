@@ -8,11 +8,34 @@ import {
   TextInput
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Search } from 'lucide-react-native';
+import {
+  Search,
+  Smartphone, Shirt, Home, Dumbbell, Cpu, HeartPulse, Sparkles,
+  Baby, Heart, Wheat, Coffee, Watch, Package,
+} from 'lucide-react-native';
 import { COLORS, SPACING, FONTS } from '../styles/theme';
 import { api } from '../services/api';
-import FallbackImage from '../components/FallbackImage';
 import LoadingLogo from '../components/LoadingLogo';
+import CategoryPanel from '../components/CategoryPanel';
+
+// One icon per top-level category, keyed by slug — same pattern as the
+// per-subcategory image lookup in CategoryPanel. Falls back to a generic
+// icon for any category slug added on the backend that isn't listed here.
+const CATEGORY_ICONS = {
+  'consumer-electronics': Smartphone,
+  'fashion-clothing': Shirt,
+  'home-appliances': Home,
+  'sports-outdoors': Dumbbell,
+  gadgets: Cpu,
+  'health-care': HeartPulse,
+  cosmetics: Sparkles,
+  'baby-food': Baby,
+  'sexual-wellness': Heart,
+  'food-grains': Wheat,
+  beverages: Coffee,
+  'wrist-watches': Watch,
+};
+const getCategoryIcon = (slug) => CATEGORY_ICONS[slug] || Package;
 
 export default function CategoriesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -40,32 +63,15 @@ export default function CategoriesScreen({ navigation }) {
     fetchCats();
   }, []);
 
-  // Subcategories don't have real photos from the backend yet — use representative stock images
-  const getSubcategoryImage = (slug) => {
-    switch(slug) {
-      case 'audio': return 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=150';
-      case 'smartwatches': return 'https://images.unsplash.com/photo-1579586337278-3befd40fd17a?w=150';
-      case 'power': return 'https://images.unsplash.com/photo-1609081219090-a6d81d3085bf?w=150';
-      case 'cases': return 'https://images.unsplash.com/photo-1603302576837-37561b2e2302?w=150';
-      case 'shoes': return 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=150';
-      case 'mens-wear': return 'https://images.unsplash.com/photo-1516257984-b1b4d707412e?w=150';
-      case 'womens-wear': return 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=150';
-      case 'bags': return 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=150';
-      case 'lighting': return 'https://images.unsplash.com/photo-1563245372-f21724e3856d?w=150';
-      case 'kitchen': return 'https://images.unsplash.com/photo-1588854337236-6889d631faa8?w=150';
-      case 'desk': return 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?w=150';
-      default: return 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=150';
-    }
-  };
-
   const handleSearchSubmit = () => {
     if (!searchQuery.trim()) return;
     navigation.navigate('HomeTab', { search: searchQuery.trim() });
   };
 
-  const handleSubcategoryPress = (sub) => {
-    navigation.navigate('HomeTab', { category: sub.slug });
-  };
+  // Any subcategory / "view all" tap — from the in-place preview below or from
+  // the CategoryOverlay modal — opens the actual product grid as a modal
+  // (CategoryProducts, which just reuses HomeScreen filtered by the slug).
+  const openProducts = (slug) => navigation.navigate('CategoryProducts', { category: slug });
 
   if (loading) {
     return (
@@ -94,18 +100,28 @@ export default function CategoriesScreen({ navigation }) {
       </View>
 
       <View style={styles.body}>
-        {/* Left Pane: Parent Categories list */}
+        {/* Left Pane: Parent Categories list — tapping one opens it as a
+            full-screen overlay (CategoryOverlayScreen), and also updates
+            the in-place preview on the right for a quick peek without
+            leaving this screen. */}
         <ScrollView style={styles.leftPane} showsVerticalScrollIndicator={false}>
           {categories.map((cat) => {
             const isActive = activeParent?.id === cat.id;
+            const Icon = getCategoryIcon(cat.slug);
             return (
               <TouchableOpacity
                 key={cat.id}
                 style={[styles.parentTab, isActive && styles.activeParentTab]}
-                onPress={() => setActiveParent(cat)}
+                onPress={() => {
+                  setActiveParent(cat);
+                  navigation.navigate('CategoryOverlay', { category: cat });
+                }}
                 activeOpacity={0.8}
               >
                 {isActive && <View style={styles.activeIndicator} />}
+                <View style={[styles.iconBox, isActive && styles.iconBoxActive]}>
+                  <Icon size={18} color={isActive ? COLORS.primary : COLORS.textLight} />
+                </View>
                 <Text style={[styles.parentTabText, isActive && styles.activeParentTabText]}>
                   {cat.name}
                 </Text>
@@ -114,49 +130,14 @@ export default function CategoriesScreen({ navigation }) {
           })}
         </ScrollView>
 
-        {/* Right Pane: Subcategories list grid */}
+        {/* Right Pane: in-place preview of the last-tapped category */}
         <ScrollView style={styles.rightPane} showsVerticalScrollIndicator={false}>
-          {activeParent && (
-            <View style={styles.rightPaneContent}>
-              {/* Promotional header card for the active category */}
-              <View style={styles.promoCard}>
-                <FallbackImage
-                  uri="https://images.unsplash.com/photo-1472851294608-062f824d296e?w=400"
-                  style={styles.promoBgImage}
-                />
-                <View style={styles.promoOverlay}>
-                  <Text style={styles.promoTitle}>⚡ {activeParent.name} Deals ⚡</Text>
-                  <Text style={styles.promoSub}>Direct pricing. Up to 80% OFF</Text>
-                </View>
-              </View>
-
-              <Text style={styles.sectionTitle}>Shop by Category</Text>
-
-              {/* Subcategories Grid */}
-              <View style={styles.subGrid}>
-                {activeParent.children && activeParent.children.length > 0 ? (
-                  activeParent.children.map((sub) => (
-                    <TouchableOpacity
-                      key={sub.id}
-                      style={styles.subCard}
-                      onPress={() => handleSubcategoryPress(sub)}
-                      activeOpacity={0.7}
-                    >
-                      <FallbackImage
-                        uri={getSubcategoryImage(sub.slug)}
-                        style={styles.subCardImage}
-                      />
-                      <Text style={styles.subCardLabel} numberOfLines={2}>
-                        {sub.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-                ) : (
-                  <Text style={styles.noSubText}>No subcategories available</Text>
-                )}
-              </View>
-            </View>
-          )}
+          <CategoryPanel
+            category={activeParent}
+            onSubcategoryPress={(sub) => openProducts(sub.slug)}
+            onViewAllPress={() => activeParent && openProducts(activeParent.slug)}
+            style={styles.rightCard}
+          />
         </ScrollView>
       </View>
     </View>
@@ -166,7 +147,7 @@ export default function CategoriesScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background,
   },
   loaderContainer: {
     flex: 1,
@@ -204,32 +185,43 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F8F9',
   },
   parentTab: {
-    paddingVertical: 18,
-    paddingHorizontal: 12,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
     position: 'relative',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EDEDED',
   },
   activeParentTab: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.primaryLight,
   },
   activeIndicator: {
     position: 'absolute',
     left: 0,
-    top: 15,
-    bottom: 15,
+    top: 8,
+    bottom: 8,
     width: 4,
     backgroundColor: COLORS.primary,
     borderTopRightRadius: 2,
     borderBottomRightRadius: 2,
   },
+  iconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: COLORS.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.sm,
+  },
+  iconBoxActive: {
+    backgroundColor: COLORS.white,
+  },
   parentTabText: {
+    flex: 1,
     fontSize: FONTS.size.xs + 1,
     color: COLORS.textLight,
-    textAlign: 'center',
     fontWeight: '500',
+    lineHeight: 15,
   },
   activeParentTabText: {
     color: COLORS.primary,
@@ -237,73 +229,9 @@ const styles = StyleSheet.create({
   },
   rightPane: {
     width: '70%',
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.background,
   },
-  rightPaneContent: {
-    padding: SPACING.md,
-  },
-  promoCard: {
-    height: 90,
-    borderRadius: 6,
-    overflow: 'hidden',
-    position: 'relative',
-    marginBottom: SPACING.md,
-  },
-  promoBgImage: {
-    width: '100%',
-    height: '100%',
-    position: 'absolute',
-  },
-  promoOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    paddingLeft: SPACING.md,
-  },
-  promoTitle: {
-    color: COLORS.white,
-    fontSize: FONTS.size.md,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  promoSub: {
-    color: '#DDDDDD',
-    fontSize: FONTS.size.xs,
-  },
-  sectionTitle: {
-    fontSize: FONTS.size.sm,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: SPACING.sm,
-  },
-  subGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  subCard: {
-    width: '30%',
-    marginRight: '3%',
-    marginBottom: SPACING.md,
-    alignItems: 'center',
-  },
-  subCardImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#F5F5F7',
-    marginBottom: 6,
-  },
-  subCardLabel: {
-    fontSize: FONTS.size.xs - 1,
-    color: COLORS.text,
-    textAlign: 'center',
-    lineHeight: 12,
-  },
-  noSubText: {
-    color: COLORS.textMuted,
-    fontSize: FONTS.size.sm,
-    paddingTop: SPACING.lg,
-    width: '100%',
-    textAlign: 'center',
+  rightCard: {
+    margin: SPACING.sm,
   },
 });

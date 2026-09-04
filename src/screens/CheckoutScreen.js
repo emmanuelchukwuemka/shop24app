@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
-import { ArrowLeft, ShieldCheck } from 'lucide-react-native';
+import { ArrowLeft, ShieldCheck, Truck, Clock } from 'lucide-react-native';
 import { COLORS, SPACING, FONTS, SHADOWS } from '../styles/theme';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -213,6 +213,16 @@ export default function CheckoutScreen({ navigation }) {
           <Text style={styles.safeBannerText}>Payments are processed securely by Paystack</Text>
         </View>
 
+        <View style={styles.deliveryBanner}>
+          <Truck size={14} color={COLORS.textLight} />
+          <Text style={styles.deliveryBannerText}>Delivered via GIG, 2 Seconds Logistics & Red Star</Text>
+        </View>
+
+        <View style={styles.deliveryBanner}>
+          <Clock size={14} color={COLORS.textLight} />
+          <Text style={styles.deliveryBannerText}>Estimated Delivery: 7-14 days</Text>
+        </View>
+
         <TouchableOpacity
           style={styles.payBtn}
           onPress={handlePay}
@@ -330,6 +340,17 @@ const styles = StyleSheet.create({
     color: COLORS.success,
     marginLeft: SPACING.xs,
     fontWeight: '500',
+  },
+  deliveryBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.lg,
+  },
+  deliveryBannerText: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.textLight,
+    marginLeft: SPACING.xs,
   },
   payBtn: {
     backgroundColor: COLORS.primary,

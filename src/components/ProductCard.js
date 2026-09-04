@@ -6,7 +6,7 @@ import { COLORS, SPACING, FONTS } from '../styles/theme';
 import { useCart } from '../context/CartContext';
 import FallbackImage from './FallbackImage';
 
-const variantLabel = (v) => [v.color, v.size].filter(Boolean).join(' / ') || `Option ${v.id}`;
+const variantLabel = (v) => [v.color, v.size, v.style].filter(Boolean).join(' / ') || `Option ${v.id}`;
 
 export default function ProductCard({ product, matchFirstRowHeight }) {
   const navigation = useNavigation();
@@ -17,6 +17,15 @@ export default function ProductCard({ product, matchFirstRowHeight }) {
   const isTopRated = (product.rating || 4.5) >= 4.8;
   const showBadgeSlot = isTopRated || matchFirstRowHeight;
   const variants = product.variants || [];
+
+  // If variants actually carry different prices, the card shouldn't claim one flat
+  // price — show "From ₦<cheapest>" instead, same logic (with discount applied) as
+  // what each variant would show individually.
+  const variantPrices = variants.map((v) =>
+    getDiscountedPrice({ price: v.price ?? product.price, discount_rate: product.discount_rate })
+  );
+  const hasVariedPricing = new Set(variantPrices).size > 1;
+  const cardPrice = hasVariedPricing ? Math.min(...variantPrices) : discountedPrice;
 
   const formattedSales =
     product.sales_count >= 1000
@@ -74,7 +83,7 @@ export default function ProductCard({ product, matchFirstRowHeight }) {
         <View style={styles.priceRow}>
           <View style={styles.priceLeft}>
             <Text style={styles.price}>
-              ₦{discountedPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              {hasVariedPricing ? 'From ' : ''}₦{cardPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
             </Text>
             <Text style={styles.sold}> 🔥{formattedSales} sold</Text>
           </View>
@@ -86,6 +95,13 @@ export default function ProductCard({ product, matchFirstRowHeight }) {
             <ShoppingCart size={13} color={COLORS.text} strokeWidth={2} />
           </TouchableOpacity>
         </View>
+
+        {/* Shipping info badge — mirrors the website's product card (product.shipping_info) */}
+        {!!product.shipping_info && (
+          <View style={styles.shippingRow}>
+            <Text style={styles.shippingBadgeText}>{product.shipping_info}</Text>
+          </View>
+        )}
       </View>
 
       {/* Variant picker — only shown when this product has more than one variant,
@@ -219,6 +235,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 4,
+  },
+
+  /* Shipping info badge */
+  shippingRow: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  shippingBadgeText: {
+    fontSize: 9,
+    fontWeight: '500',
+    color: COLORS.success,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 3,
+    overflow: 'hidden',
   },
 
   /* Variant picker modal */

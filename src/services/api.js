@@ -1,5 +1,34 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 const BASE_URL = 'https://myshop24.ng/api/m';
 const ORIGIN_URL = BASE_URL.replace(/\/api\/m$/, '');
+
+const CACHE_PREFIX = 'shop24_cache:';
+
+// Cache-first with a TTL: if a cached entry is still fresh, return it instantly with
+// zero network request. Otherwise fetch, cache the result, and return it. `forceRefresh`
+// (pull-to-refresh) always skips the cache and hits the network.
+async function cachedFetch(key, ttlMs, fetcher, forceRefresh = false) {
+  const cacheKey = CACHE_PREFIX + key;
+
+  if (!forceRefresh) {
+    try {
+      const raw = await AsyncStorage.getItem(cacheKey);
+      if (raw) {
+        const { data, savedAt } = JSON.parse(raw);
+        if (Date.now() - savedAt < ttlMs) {
+          return data;
+        }
+      }
+    } catch {
+      // Corrupt/unreadable cache entry — fall through to a real fetch.
+    }
+  }
+
+  const data = await fetcher();
+  AsyncStorage.setItem(cacheKey, JSON.stringify({ data, savedAt: Date.now() })).catch(() => {});
+  return data;
+}
 
 let _authToken = null;
 
@@ -41,17 +70,17 @@ export const api = {
     return `${ORIGIN_URL}${path}`;
   },
 
-  getBanners: async () => {
+  getBanners: async ({ forceRefresh = false } = {}) => cachedFetch('banners', 10 * 60 * 1000, async () => {
     const response = await fetchWithTimeout(`${BASE_URL}/banners`);
     if (!response.ok) throw new Error(`getBanners failed: ${response.status}`);
     return await response.json();
-  },
+  }, forceRefresh),
 
-  getCategories: async () => {
+  getCategories: async ({ forceRefresh = false } = {}) => cachedFetch('categories', 30 * 60 * 1000, async () => {
     const response = await fetchWithTimeout(`${BASE_URL}/categories`);
     if (!response.ok) throw new Error(`getCategories failed: ${response.status}`);
     return await response.json();
-  },
+  }, forceRefresh),
 
   getProducts: async (filters = {}) => {
     let url = `${BASE_URL}/products?`;
@@ -81,17 +110,19 @@ export const api = {
     return await response.json();
   },
 
-  getFlashSales: async () => {
+  // Short TTL — flash sales are time-sensitive (countdown timers), so this stays
+  // close to real-time while still avoiding a re-fetch on every screen focus.
+  getFlashSales: async ({ forceRefresh = false } = {}) => cachedFetch('flash_sales', 2 * 60 * 1000, async () => {
     const response = await fetchWithTimeout(`${BASE_URL}/flash-sales`);
     if (!response.ok) throw new Error(`getFlashSales failed: ${response.status}`);
     return await response.json();
-  },
+  }, forceRefresh),
 
-  getCuratedSet: async () => {
+  getCuratedSet: async ({ forceRefresh = false } = {}) => cachedFetch('curated_set', 10 * 60 * 1000, async () => {
     const response = await fetchWithTimeout(`${BASE_URL}/curated-sets`);
     if (!response.ok) throw new Error(`getCuratedSet failed: ${response.status}`);
     return await response.json();
-  },
+  }, forceRefresh),
 
   getTrendingKeywords: async () => {
     const response = await fetchWithTimeout(`${BASE_URL}/search-trending`);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,10 +9,12 @@ import {
   Dimensions,
   ActivityIndicator,
   Alert,
-  Share
+  Share,
+  Modal,
+  FlatList
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Star, Heart, Share2, Shield, Truck, Award } from 'lucide-react-native';
+import { ArrowLeft, Star, Heart, Share2, Shield, Truck, Award, Search, ShoppingCart, MapPin, Clock } from 'lucide-react-native';
 import { COLORS, SPACING, FONTS } from '../styles/theme';
 import { api } from '../services/api';
 import { useCart } from '../context/CartContext';
@@ -28,7 +30,7 @@ const { width } = Dimensions.get('window');
 export default function ProductDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { productId } = route.params;
-  const { addToCart, getDiscountedPrice } = useCart();
+  const { addToCart, getDiscountedPrice, cartCount } = useCart();
   const { isWishlisted, toggleWishlist } = useWishlist();
   const { user } = useAuth();
 
@@ -40,8 +42,36 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
-  const [selectedVariant, setSelectedVariant] = useState(null);
+  // Color/size/style are independently selectable (like the reference AliExpress-style
+  // picker) — the exact combination of all three resolves to one ProductVariant, with
+  // its own price/stock, computed below rather than stored directly.
+  const [selectedColor, setSelectedColor] = useState(null);
+  const [selectedSize, setSelectedSize] = useState(null);
+  const [selectedStyle, setSelectedStyle] = useState(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const previewListRef = useRef(null);
+  const swiperRef = useRef(null);
+
+  // Modal content stays mounted between opens, so re-sync scroll position each time
+  // it's opened — initialScrollIndex alone only applies on the FlatList's first mount.
+  useEffect(() => {
+    if (previewVisible) {
+      const timer = setTimeout(() => {
+        previewListRef.current?.scrollToIndex({ index: previewIndex, animated: false });
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [previewVisible]);
+
+  // Picking a different color can bring a different photo to the front of the
+  // gallery (see imagesList below) — jump the swiper back to it so it's actually
+  // visible instead of requiring the user to manually swipe back to index 0.
+  useEffect(() => {
+    swiperRef.current?.scrollTo({ x: 0, animated: true });
+    setActiveImageIndex(0);
+  }, [selectedColor]);
 
   useEffect(() => {
     const fetchDetail = async () => {
@@ -49,7 +79,13 @@ export default function ProductDetailScreen({ route, navigation }) {
         setLoading(true);
         const data = await api.getProductDetails(productId);
         setProduct(data);
-        setSelectedVariant(data.variants && data.variants.length > 0 ? data.variants[0] : null);
+        const productVariants = data.variants || [];
+        // Prefer the first in-stock combination; fall back to the first variant at
+        // all (e.g. everything's sold out) so something is still selected.
+        const defaultVariant = productVariants.find((v) => v.stock > 0) || productVariants[0] || null;
+        setSelectedColor(defaultVariant?.color ?? null);
+        setSelectedSize(defaultVariant?.size ?? null);
+        setSelectedStyle(defaultVariant?.style ?? null);
       } catch (e) {
         console.error(e);
         Alert.alert('Error', 'Failed to load product details.');
@@ -69,22 +105,59 @@ export default function ProductDetailScreen({ route, navigation }) {
     );
   }
 
-  const variantLabel = (v) => [v.color, v.size].filter(Boolean).join(' / ') || `Option ${v.id}`;
+  const variants = product.variants || [];
+  // Distinct values per dimension, in first-seen order. A dimension's row only
+  // renders at all if at least one variant actually sets it (e.g. most products
+  // have no "style", so that row just doesn't show).
+  const colorOptions = [...new Set(variants.map((v) => v.color).filter(Boolean))];
+  const sizeOptions = [...new Set(variants.map((v) => v.size).filter(Boolean))];
+  const styleOptions = [...new Set(variants.map((v) => v.style).filter(Boolean))];
+
+  // The one variant matching every currently-selected dimension — dimensions the
+  // product doesn't use at all (empty options list) are ignored in the match.
+  const selectedVariant = variants.find((v) =>
+    (colorOptions.length === 0 || v.color === selectedColor) &&
+    (sizeOptions.length === 0 || v.size === selectedSize) &&
+    (styleOptions.length === 0 || v.style === selectedStyle)
+  ) || null;
+
+  // Is `value` (in `dimension`) still reachable in-stock given the OTHER two
+  // dimensions' current selections? Drives which chips render as disabled.
+  const isOptionAvailable = (dimension, value) =>
+    variants.some((v) => {
+      if (v.stock <= 0) return false;
+      if (dimension !== 'color' && colorOptions.length > 0 && v.color !== selectedColor) return false;
+      if (dimension !== 'size' && sizeOptions.length > 0 && v.size !== selectedSize) return false;
+      if (dimension !== 'style' && styleOptions.length > 0 && v.style !== selectedStyle) return false;
+      return v[dimension] === value;
+    });
+
+  const variantLabel = selectedVariant
+    ? [selectedVariant.color, selectedVariant.size, selectedVariant.style].filter(Boolean).join(' / ')
+    : null;
   const priceSource = { price: selectedVariant?.price ?? product.price, discount_rate: product.discount_rate };
   const discountedPrice = getDiscountedPrice(priceSource);
   const hasDiscount = product.discount_rate > 0;
   const outOfStock = selectedVariant && selectedVariant.stock <= 0;
 
-  // Set up mock images if arrays are empty or string
-  const imagesList = Array.isArray(product.images) && product.images.length > 0
+  // The base image gallery, with the selected color's own photo (if it has one)
+  // pinned to the front — so picking a color swaps the main image, without every
+  // size/style needing its own duplicate photo.
+  const baseImages = Array.isArray(product.images) && product.images.length > 0
     ? product.images
     : [product.image_url];
+  const colorImage = colorOptions.length > 0
+    ? variants.find((v) => v.color === selectedColor && v.image_url)?.image_url
+    : null;
+  const imagesList = colorImage && !baseImages.includes(colorImage)
+    ? [colorImage, ...baseImages]
+    : baseImages;
 
   const cartProduct = () => ({
     ...product,
     price: priceSource.price,
     variant_id: selectedVariant?.id ?? null,
-    variant_label: selectedVariant ? variantLabel(selectedVariant) : null,
+    variant_label: variantLabel,
   });
 
   const handleAddToCart = () => {
@@ -192,6 +265,7 @@ export default function ProductDetailScreen({ route, navigation }) {
         {/* Product Images Swiper */}
         <View style={styles.swiperContainer}>
           <ScrollView
+            ref={swiperRef}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
@@ -202,7 +276,16 @@ export default function ProductDetailScreen({ route, navigation }) {
             scrollEventThrottle={16}
           >
             {imagesList.map((img, idx) => (
-              <FallbackImage key={idx} uri={img} style={styles.productImage} iconSize={40} />
+              <TouchableOpacity
+                key={idx}
+                activeOpacity={0.95}
+                onPress={() => {
+                  setPreviewIndex(idx);
+                  setPreviewVisible(true);
+                }}
+              >
+                <FallbackImage uri={img} style={styles.productImage} iconSize={40} />
+              </TouchableOpacity>
             ))}
           </ScrollView>
           
@@ -274,34 +357,45 @@ export default function ProductDetailScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Variant Picker */}
-        {product.variants && product.variants.length > 0 && (
-          <View style={styles.variantSection}>
-            <Text style={styles.variantLabel}>Options</Text>
-            <View style={styles.variantChipsRow}>
-              {product.variants.map((v) => {
-                const isSelected = selectedVariant?.id === v.id;
-                const isSoldOut = v.stock <= 0;
-                return (
-                  <TouchableOpacity
-                    key={v.id}
-                    style={[
-                      styles.variantChip,
-                      isSelected && styles.variantChipSelected,
-                      isSoldOut && styles.variantChipDisabled,
-                    ]}
-                    onPress={() => setSelectedVariant(v)}
-                    disabled={isSoldOut}
-                  >
-                    <Text style={[styles.variantChipText, isSelected && styles.variantChipTextSelected]}>
-                      {variantLabel(v)}{isSoldOut ? ' (Sold out)' : ''}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+        {/* Variant Picker — Color, Size, and Style are independent rows, each only
+            shown when the product actually uses that dimension (most products have
+            no "style" at all, for instance). A chip is disabled when there's no
+            in-stock combination reachable from it given what's already selected
+            in the other two rows. */}
+        {[
+          { dimension: 'color', label: 'Color', options: colorOptions, selected: selectedColor, onSelect: setSelectedColor },
+          { dimension: 'size', label: 'Size', options: sizeOptions, selected: selectedSize, onSelect: setSelectedSize },
+          { dimension: 'style', label: 'Style', options: styleOptions, selected: selectedStyle, onSelect: setSelectedStyle },
+        ].map(({ dimension, label, options, selected, onSelect }) => {
+          if (options.length === 0) return null;
+          return (
+            <View key={dimension} style={styles.variantSection}>
+              <Text style={styles.variantLabel}>{label}{selected ? `: ${selected}` : ''}</Text>
+              <View style={styles.variantChipsRow}>
+                {options.map((value) => {
+                  const isSelected = selected === value;
+                  const isAvailable = isOptionAvailable(dimension, value);
+                  return (
+                    <TouchableOpacity
+                      key={value}
+                      style={[
+                        styles.variantChip,
+                        isSelected && styles.variantChipSelected,
+                        !isAvailable && styles.variantChipDisabled,
+                      ]}
+                      onPress={() => onSelect(value)}
+                      disabled={!isAvailable}
+                    >
+                      <Text style={[styles.variantChipText, isSelected && styles.variantChipTextSelected]}>
+                        {value}{!isAvailable ? ' (Sold out)' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
-          </View>
-        )}
+          );
+        })}
 
         {/* Trust Badges Panel */}
         <View style={styles.trustSection}>
@@ -316,6 +410,14 @@ export default function ProductDetailScreen({ route, navigation }) {
           <View style={styles.trustRow}>
             <Award size={16} color="#FF9900" />
             <Text style={styles.trustText}>Shipped from {product.store_name || 'Shop24 Factory'}</Text>
+          </View>
+          <View style={styles.trustRow}>
+            <MapPin size={16} color={COLORS.textLight} />
+            <Text style={styles.trustText}>Delivered via GIG, 2 Seconds Logistics & Red Star</Text>
+          </View>
+          <View style={styles.trustRow}>
+            <Clock size={16} color={COLORS.textLight} />
+            <Text style={styles.trustText}>Estimated Delivery: 7-14 days</Text>
           </View>
         </View>
 
@@ -479,6 +581,74 @@ export default function ProductDetailScreen({ route, navigation }) {
           <Text style={styles.buyNowText}>Buy Now</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Full-screen image preview — opens on tapping the product image */}
+      <Modal visible={previewVisible} animationType="fade" onRequestClose={() => setPreviewVisible(false)}>
+        <View style={styles.previewContainer}>
+          <View style={[styles.previewHeader, { paddingTop: insets.top + 6 }]}>
+            <TouchableOpacity style={styles.previewHeaderBtn} onPress={() => setPreviewVisible(false)}>
+              <ArrowLeft size={20} color={COLORS.white} />
+            </TouchableOpacity>
+            <Text style={styles.previewCounter}>{previewIndex + 1}/{imagesList.length}</Text>
+            <TouchableOpacity style={styles.previewHeaderBtn}>
+              <Search size={20} color={COLORS.white} />
+            </TouchableOpacity>
+          </View>
+
+          <FlatList
+            ref={previewListRef}
+            data={imagesList}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(_, idx) => String(idx)}
+            initialScrollIndex={previewIndex}
+            getItemLayout={(data, index) => ({ length: width, offset: width * index, index })}
+            onScroll={(e) => {
+              const slide = Math.round(e.nativeEvent.contentOffset.x / width);
+              if (slide !== previewIndex) setPreviewIndex(slide);
+            }}
+            scrollEventThrottle={16}
+            onScrollToIndexFailed={(info) => {
+              setTimeout(() => {
+                previewListRef.current?.scrollToIndex({ index: info.index, animated: false });
+              }, 100);
+            }}
+            renderItem={({ item }) => (
+              <View style={styles.previewImageWrap}>
+                <FallbackImage uri={item} style={styles.previewImage} resizeMode="contain" iconSize={40} />
+              </View>
+            )}
+          />
+
+          {colorOptions.length > 1 && (
+            <View style={styles.previewColorPill}>
+              <Text style={styles.previewColorPillText}>{colorOptions.length} Color</Text>
+            </View>
+          )}
+
+          <View style={[styles.previewCartBubble, { bottom: insets.bottom + 90 }]}>
+            <ShoppingCart size={18} color={COLORS.white} />
+            {cartCount > 0 && (
+              <View style={styles.previewCartBadge}>
+                <Text style={styles.previewCartBadgeText}>{cartCount}</Text>
+              </View>
+            )}
+            <Text style={styles.previewCartFreeShipText}>Free{'\n'}shipping</Text>
+          </View>
+
+          <View style={[styles.previewFooter, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+            <TouchableOpacity
+              style={[styles.previewAddToCartBtn, outOfStock && styles.disabledBtn]}
+              onPress={() => { handleAddToCart(); setPreviewVisible(false); }}
+              activeOpacity={0.8}
+              disabled={outOfStock}
+            >
+              <Text style={styles.previewAddToCartText}>{outOfStock ? 'Sold Out' : 'Add to cart'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -935,5 +1105,104 @@ const styles = StyleSheet.create({
   },
   disabledBtn: {
     opacity: 0.5,
+  },
+
+  /* Full-screen image preview */
+  previewContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  previewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.sm,
+    zIndex: 10,
+  },
+  previewHeaderBtn: {
+    width: 34,
+    height: 34,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewCounter: {
+    color: COLORS.white,
+    fontSize: FONTS.size.md,
+    fontWeight: '600',
+  },
+  previewImageWrap: {
+    width: width,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  previewColorPill: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 150,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  previewColorPillText: {
+    color: COLORS.white,
+    fontSize: FONTS.size.sm,
+    fontWeight: '600',
+  },
+  previewCartBubble: {
+    position: 'absolute',
+    right: SPACING.md,
+    backgroundColor: COLORS.success,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewCartBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: COLORS.primary,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  previewCartBadgeText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  previewCartFreeShipText: {
+    color: COLORS.white,
+    fontSize: 8,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginTop: 2,
+    lineHeight: 9,
+  },
+  previewFooter: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
+  },
+  previewAddToCartBtn: {
+    backgroundColor: COLORS.primary,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewAddToCartText: {
+    color: COLORS.white,
+    fontSize: FONTS.size.md,
+    fontWeight: 'bold',
   },
 });

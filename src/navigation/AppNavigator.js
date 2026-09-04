@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Image, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Image, Text, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Search, User, ShoppingCart } from 'lucide-react-native';
@@ -23,6 +23,7 @@ import ContactScreen from '../screens/ContactScreen';
 import VendorDashboardScreen from '../screens/VendorDashboardScreen';
 import BecomeSellerScreen from '../screens/BecomeSellerScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
+import CategoryOverlayScreen from '../screens/CategoryOverlayScreen';
 
 // Auth Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -40,7 +41,7 @@ function TabNavigator() {
     <Tab.Navigator
       screenOptions={{
         tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: '#999999',
+        tabBarInactiveTintColor: COLORS.black,
         tabBarStyle: {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
@@ -131,6 +132,11 @@ function MainNavigator() {
       <Stack.Screen name="VendorDashboard" component={VendorDashboardScreen} />
       <Stack.Screen name="BecomeSeller" component={BecomeSellerScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
+      <Stack.Screen name="CategoryOverlay" component={CategoryOverlayScreen} options={{ presentation: 'modal' }} />
+      {/* Reuses HomeScreen itself — it already filters by route.params.category
+          and clears the param on focus, so this is a fully working product
+          grid with zero new logic, just shown modally instead of as the tab root. */}
+      <Stack.Screen name="CategoryProducts" component={HomeScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Login" component={LoginScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Register" component={RegisterScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ presentation: 'modal' }} />
@@ -142,13 +148,11 @@ function MainNavigator() {
 export default function AppNavigator() {
   const { isLoading } = useAuth();
 
+  // Blank, not another logo+spinner splash — the App-level splash sequence already
+  // covers this brief moment; a second competing splash here caused it to visually
+  // linger/overlap after the main sequence finished.
   if (isLoading) {
-    return (
-      <View style={styles.splash}>
-        <Image source={require('../../assets/logo.png')} style={styles.splashLogo} resizeMode="contain" />
-        <ActivityIndicator color={COLORS.primary} style={{ marginTop: 24 }} />
-      </View>
-    );
+    return <View style={styles.splash} />;
   }
 
   // Browsing is open to everyone; sign-in is only required to complete a purchase.
@@ -158,13 +162,7 @@ export default function AppNavigator() {
 const styles = StyleSheet.create({
   splash: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: COLORS.white,
-  },
-  splashLogo: {
-    width: 96,
-    height: 96,
   },
 });
 

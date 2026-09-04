@@ -4,12 +4,12 @@ import {
   Text, 
   View, 
   TouchableOpacity, 
-  Animated, 
-  Easing, 
-  Modal, 
-  Image,
-  Alert 
+  Animated,
+  Easing,
+  Modal,
+  Alert
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Sparkles, Trophy, Gift, ArrowRight } from 'lucide-react-native';
 import { COLORS, SPACING, FONTS, SHADOWS } from '../styles/theme';
@@ -108,9 +108,10 @@ export default function SpinWheelScreen({ navigation }) {
           ]}
         >
           {/* We style the wheel background with beautiful segment dividers or simple color wheel */}
-          <Image 
-            source={{ uri: 'https://images.unsplash.com/photo-1595079676339-1534801ad6cf?w=400' }} 
-            style={styles.wheelBackgroundImage} 
+          <Image
+            source={{ uri: 'https://images.unsplash.com/photo-1595079676339-1534801ad6cf?w=400' }}
+            style={styles.wheelBackgroundImage}
+            cachePolicy="memory-disk"
           />
           <View style={styles.wheelInner}>
             {PRIZES.map((prize, idx) => (
@@ -155,9 +156,10 @@ export default function SpinWheelScreen({ navigation }) {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Image 
-              source={{ uri: 'https://images.unsplash.com/photo-1513201099705-a9746e1e201f?w=300' }} 
+            <Image
+              source={{ uri: 'https://images.unsplash.com/photo-1513201099705-a9746e1e201f?w=300' }}
               style={styles.giftBoxImage}
+              cachePolicy="memory-disk"
             />
             <Text style={styles.modalCongrat}>CONGRATULATIONS!</Text>
             <Text style={styles.modalWinning}>You won: <Text style={styles.prizeHighlight}>{winningPrize}</Text></Text>

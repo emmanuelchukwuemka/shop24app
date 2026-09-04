@@ -13,8 +13,8 @@ import {
   Alert,
   BackHandler,
   Linking,
-  Image
 } from 'react-native';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -28,10 +28,9 @@ import LoadingLogo from '../components/LoadingLogo';
 import FallbackImage from '../components/FallbackImage';
 
 const { width: windowWidth, height: windowHeight } = Dimensions.get('window');
-// Sized so 2 sliding Flash Sale cards + 1 static Curated Set card all fit on screen at once,
-// with SPACING.md padding on each side and SPACING.sm gaps between the 3 cards.
-const DEALS_CARD_WIDTH = Math.floor((windowWidth - SPACING.md * 2 - SPACING.sm * 2) / 3);
-const DEALS_CARD_IMAGE_HEIGHT = Math.round(DEALS_CARD_WIDTH * 1.15);
+// Smaller, borderless cards — more of them visible per screen than before.
+const DEALS_CARD_WIDTH = Math.floor((windowWidth - SPACING.md * 2) / 3.4);
+const DEALS_CARD_IMAGE_HEIGHT = DEALS_CARD_WIDTH;
 const FLASH_ITEM_WIDTH = DEALS_CARD_WIDTH + SPACING.sm; // card width + its own marginRight
 
 export default function HomeScreen({ navigation, route }) {
@@ -64,6 +63,10 @@ export default function HomeScreen({ navigation, route }) {
   // Auto-sliding Flash Sale carousel
   const flashListRef = useRef(null);
   const flashSlideIndexRef = useRef(0);
+
+  // Auto-sliding Curated Set carousel (its own slot, next to the Flash Sale lane)
+  const curatedListRef = useRef(null);
+  const curatedSlideIndexRef = useRef(0);
 
   // Auto-sliding banner carousel (advert banners, admin-controlled)
   const bannerListRef = useRef(null);
@@ -147,15 +150,16 @@ export default function HomeScreen({ navigation, route }) {
     }, [searchQuery, activeCategory])
   );
 
-  // Load initial data
-  const loadData = async () => {
+  // Load initial data. forceRefresh (pull-to-refresh) skips the cache-first
+  // layer in api.js so a manual refresh always hits the server for real.
+  const loadData = async (forceRefresh = false) => {
     try {
       setLoading(true);
       const [categoriesData, bannersData, flashData, curatedData, keywords] = await Promise.all([
-        api.getCategories().catch(() => []),
-        api.getBanners().catch(() => []),
-        api.getFlashSales().catch(() => []),
-        api.getCuratedSet().catch(() => []),
+        api.getCategories({ forceRefresh }).catch(() => []),
+        api.getBanners({ forceRefresh }).catch(() => []),
+        api.getFlashSales({ forceRefresh }).catch(() => []),
+        api.getCuratedSet({ forceRefresh }).catch(() => []),
         api.getTrendingKeywords().catch(() => []),
         loadFirstPage().catch(() => {}),
       ]);
@@ -186,7 +190,6 @@ export default function HomeScreen({ navigation, route }) {
   }, [trendingKeywords]);
 
   // Auto-slide the Flash Sale carousel every few seconds, looping back to the start.
-  // Curated Set is intentionally not part of this — it's a fixed card, not slid.
   useEffect(() => {
     if (flashSales.length <= 1) return;
     flashSlideIndexRef.current = 0;
@@ -196,6 +199,17 @@ export default function HomeScreen({ navigation, route }) {
     }, 3000);
     return () => clearInterval(interval);
   }, [flashSales]);
+
+  // Auto-slide the Curated Set carousel too, same as Flash Sale, in its own slot
+  useEffect(() => {
+    if (curatedSet.length <= 1) return;
+    curatedSlideIndexRef.current = 0;
+    const interval = setInterval(() => {
+      curatedSlideIndexRef.current = (curatedSlideIndexRef.current + 1) % curatedSet.length;
+      curatedListRef.current?.scrollToIndex({ index: curatedSlideIndexRef.current, animated: true });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [curatedSet]);
 
   // Auto-slide the advert banner carousel every few seconds, looping back to the start
   useEffect(() => {
@@ -210,7 +224,7 @@ export default function HomeScreen({ navigation, route }) {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData();
+    await loadData(true);
     setRefreshing(false);
   };
 
@@ -225,19 +239,46 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
-  const handleImageSearch = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  // The button shows a camera icon, so it should actually offer the camera —
+  // previously this only ever opened the photo library, camera permission was
+  // never requested, and ImagePicker.launchCameraAsync was never called at all.
+  const handleImageSearch = () => {
+    Alert.alert(
+      'Search by Photo',
+      'Take a new photo or choose one from your gallery to find similar products.',
+      [
+        { text: 'Take Photo', onPress: () => pickImageForSearch('camera') },
+        { text: 'Choose from Gallery', onPress: () => pickImageForSearch('library') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const pickImageForSearch = async (source) => {
+    const permission = source === 'camera'
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
     if (!permission.granted) {
-      Alert.alert('Permission Needed', 'Please allow photo access to search by image.');
+      Alert.alert(
+        'Permission Needed',
+        source === 'camera'
+          ? 'Please allow camera access to take a photo.'
+          : 'Please allow photo access to search by image.'
+      );
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
+    const pickerOptions = {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       base64: true,
       quality: 0.5,
       allowsEditing: true,
-    });
+    };
+    const result = source === 'camera'
+      ? await ImagePicker.launchCameraAsync(pickerOptions)
+      : await ImagePicker.launchImageLibraryAsync(pickerOptions);
+
     if (result.canceled || !result.assets?.[0]?.base64) return;
 
     setSearchQuery('');
@@ -330,9 +371,17 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
+  // Size the banner slot to match the first uploaded image's own aspect ratio, so it's
+  // never cropped regardless of what dimensions the admin uploads at. Other banners in
+  // the same carousel share this height too, with resizeMode="contain" as a safety net.
+  const firstImageBanner = banners.find((b) => b.image_path);
+  const bannerHeight = firstImageBanner && firstImageBanner.image_width && firstImageBanner.image_height
+    ? Math.round(windowWidth * (firstImageBanner.image_height / firstImageBanner.image_width))
+    : Math.round(windowWidth * 0.45);
+
   const handleBannerPress = (item) => {
-    if (item.product_id) {
-      navigation.navigate('ProductDetails', { productId: item.product_id });
+    if (item.category) {
+      handleCategoryPress(item.category.slug);
     } else if (item.button_url && /^https?:\/\//i.test(item.button_url)) {
       Linking.openURL(item.button_url).catch(() => {});
     }
@@ -346,12 +395,12 @@ export default function HomeScreen({ navigation, route }) {
     if (imageUri) {
       return (
         <TouchableOpacity activeOpacity={0.9} onPress={() => handleBannerPress(item)}>
-          <Image source={{ uri: imageUri }} style={styles.bannerImage} resizeMode="cover" />
-          {!!item.product_id && (
-            <View style={styles.bannerShopNowBtn}>
-              <Text style={styles.bannerShopNowText}>Shop Now ›</Text>
-            </View>
-          )}
+          <Image
+            source={{ uri: imageUri }}
+            style={[styles.bannerImage, { height: bannerHeight }]}
+            contentFit="contain"
+            cachePolicy="memory-disk"
+          />
         </TouchableOpacity>
       );
     }
@@ -360,12 +409,12 @@ export default function HomeScreen({ navigation, route }) {
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={() => handleBannerPress(item)}
-        style={[styles.bannerCard, { backgroundColor: item.background_color || COLORS.primary }]}
+        style={[styles.bannerCard, { height: bannerHeight, backgroundColor: item.background_color || COLORS.primary }]}
       >
         <View style={styles.bannerCardText}>
           {!!item.title && <Text style={styles.bannerCardTitle}>{item.title}</Text>}
           {!!item.subtitle && <Text style={styles.bannerCardSubtitle}>{item.subtitle}</Text>}
-          {(!!item.button_text || !!item.product_id) && (
+          {(!!item.button_text || !!item.category) && (
             <View style={styles.bannerCardButton}>
               <Text style={styles.bannerCardButtonText}>{item.button_text || 'Shop now'}</Text>
             </View>
@@ -389,53 +438,29 @@ export default function HomeScreen({ navigation, route }) {
     );
   };
 
-  // Render Horizontal Flash Sale Item — the sliding part of the row
-  const renderFlashSaleItem = ({ item }) => {
-    const flashPrice = Number(item.flash_price);
-    const originalPrice = Number(item.product.price);
-    const discountPercent = originalPrice > 0
-      ? Math.round((1 - flashPrice / originalPrice) * 100)
-      : 0;
-
-    return (
-      <TouchableOpacity
-        style={styles.flashItem}
-        activeOpacity={0.85}
-        onPress={() => navigation.navigate('ProductDetails', { productId: item.product.id })}
-      >
-        <View style={styles.flashItemImageWrap}>
-          <FallbackImage uri={item.product.image_url} style={styles.flashItemImage} />
-          {discountPercent > 0 && (
-            <View style={styles.flashDiscountTag}>
-              <Text style={styles.flashDiscountText}>-{discountPercent}%</Text>
-            </View>
-          )}
-        </View>
-        <Text style={styles.flashItemName} numberOfLines={1}>{item.product.name}</Text>
-        {item.product.sales_count > 0 && (
-          <Text style={styles.flashSoldText}>🔥 {item.product.sales_count} sold</Text>
-        )}
-      </TouchableOpacity>
-    );
-  };
-
-  // Render the fixed, non-sliding Curated Set card — always visible, doesn't scroll with Flash Sale
-  const renderCuratedCard = (item) => (
+  // Render Horizontal Flash Sale Item — the sliding part of the row.
+  // Minimal by design: just the image and the price, no card chrome, no badges.
+  const renderFlashSaleItem = ({ item }) => (
     <TouchableOpacity
-      style={styles.flashItem}
+      style={styles.dealItem}
       activeOpacity={0.85}
       onPress={() => navigation.navigate('ProductDetails', { productId: item.product.id })}
     >
-      <View style={styles.flashItemImageWrap}>
-        <FallbackImage uri={item.product.image_url} style={styles.flashItemImage} />
-        <View style={styles.curatedTag}>
-          <Text style={styles.flashDiscountText}>Curated Set</Text>
-        </View>
-      </View>
-      <Text style={styles.flashItemName} numberOfLines={1}>{item.product.name}</Text>
-      {item.product.sales_count > 0 && (
-        <Text style={styles.flashSoldText}>🔥 {item.product.sales_count} sold</Text>
-      )}
+      <FallbackImage uri={item.product.image_url} style={styles.dealItemImage} />
+      <Text style={styles.dealItemPrice}>₦{Number(item.flash_price).toLocaleString()}</Text>
+    </TouchableOpacity>
+  );
+
+  // Render the fixed, non-sliding Curated Set card — always visible, doesn't scroll with Flash Sale.
+  // Same minimal treatment: image + price only.
+  const renderCuratedCard = (item) => (
+    <TouchableOpacity
+      style={styles.dealItem}
+      activeOpacity={0.85}
+      onPress={() => navigation.navigate('ProductDetails', { productId: item.product.id })}
+    >
+      <FallbackImage uri={item.product.image_url} style={styles.dealItemImage} />
+      <Text style={styles.dealItemPrice}>₦{Number(item.product.price).toLocaleString()}</Text>
     </TouchableOpacity>
   );
 
@@ -533,44 +558,62 @@ export default function HomeScreen({ navigation, route }) {
         )}
 
         {/* Flash Sale (sliding) + Curated Set (fixed card) — side by side in one row */}
-        {(flashSales.length > 0 || curatedSet.length > 0) && (
+        {flashSales.length > 0 && (
           <View style={styles.sectionContainer}>
             <View style={styles.sectionHeader}>
               <View style={styles.dealsTitleContainer}>
-                <Text style={styles.dealsTitle}>{flashSales.length > 0 ? '⚡ Flash Sale' : '✨ Curated Set'}</Text>
+                <Text style={styles.dealsTitle}>⚡ Flash Sale</Text>
               </View>
               {nextFlashSaleEnd && <CountdownTimer endTime={nextFlashSaleEnd} />}
             </View>
-            <View style={styles.dealsRow}>
-              {flashSales.length > 0 && (
-                <View style={styles.flashSliderWrap}>
-                  <FlatList
-                    ref={flashListRef}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    data={flashSales}
-                    keyExtractor={(item) => String(item.id)}
-                    renderItem={renderFlashSaleItem}
-                    contentContainerStyle={styles.dealsList}
-                    getItemLayout={(data, index) => ({
-                      length: FLASH_ITEM_WIDTH,
-                      offset: FLASH_ITEM_WIDTH * index,
-                      index,
-                    })}
-                    onScrollToIndexFailed={(info) => {
-                      setTimeout(() => {
-                        flashListRef.current?.scrollToIndex({ index: info.index, animated: true });
-                      }, 100);
-                    }}
-                  />
-                </View>
-              )}
-              {curatedSet.length > 0 && (
-                <View style={flashSales.length === 0 ? styles.dealsList : null}>
-                  {renderCuratedCard(curatedSet[0])}
-                </View>
-              )}
+            <FlatList
+              ref={flashListRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={flashSales}
+              keyExtractor={(item) => String(item.id)}
+              renderItem={renderFlashSaleItem}
+              contentContainerStyle={styles.dealsList}
+              getItemLayout={(data, index) => ({
+                length: FLASH_ITEM_WIDTH,
+                offset: FLASH_ITEM_WIDTH * index,
+                index,
+              })}
+              onScrollToIndexFailed={(info) => {
+                setTimeout(() => {
+                  flashListRef.current?.scrollToIndex({ index: info.index, animated: true });
+                }, 100);
+              }}
+            />
+          </View>
+        )}
+
+        {curatedSet.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.dealsTitleContainer}>
+                <Text style={styles.dealsTitle}>✨ Curated Set</Text>
+              </View>
             </View>
+            <FlatList
+              ref={curatedListRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={curatedSet}
+              keyExtractor={(item) => String(item.id)}
+              renderItem={({ item }) => renderCuratedCard(item)}
+              contentContainerStyle={styles.dealsList}
+              getItemLayout={(data, index) => ({
+                length: FLASH_ITEM_WIDTH,
+                offset: FLASH_ITEM_WIDTH * index,
+                index,
+              })}
+              onScrollToIndexFailed={(info) => {
+                setTimeout(() => {
+                  curatedListRef.current?.scrollToIndex({ index: info.index, animated: true });
+                }, 100);
+              }}
+            />
           </View>
         )}
 
@@ -724,26 +767,9 @@ const styles = StyleSheet.create({
   },
   bannerImage: {
     width: windowWidth,
-    height: windowWidth * 0.45,
-  },
-  bannerShopNowBtn: {
-    position: 'absolute',
-    left: SPACING.lg,
-    bottom: SPACING.lg,
-    backgroundColor: COLORS.white,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 6,
-    borderRadius: 16,
-    ...SHADOWS.medium,
-  },
-  bannerShopNowText: {
-    fontSize: FONTS.size.sm,
-    fontWeight: FONTS.weight.bold,
-    color: COLORS.text,
   },
   bannerCard: {
     width: windowWidth,
-    height: windowWidth * 0.45,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.lg,
@@ -881,81 +907,22 @@ const styles = StyleSheet.create({
   dealsList: {
     paddingLeft: SPACING.md,
   },
-  dealsRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  flashSliderWrap: {
-    width: FLASH_ITEM_WIDTH * 2,
-    overflow: 'hidden',
-  },
-  flashItem: {
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  // Minimal deal card — no background, no border, no shadow: just an image and a price.
+  dealItem: {
     width: DEALS_CARD_WIDTH,
-    padding: 8,
     marginRight: SPACING.sm,
-    ...SHADOWS.light,
   },
-  flashItemImageWrap: {
-    position: 'relative',
-  },
-  flashItemImage: {
+  dealItemImage: {
     width: '100%',
     height: DEALS_CARD_IMAGE_HEIGHT,
-    borderRadius: 8,
+    borderRadius: 10,
+    backgroundColor: '#F5F5F7', // fill while loading — not a border, just avoids a flash of empty space
   },
-  flashDiscountTag: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  flashDiscountText: {
-    color: COLORS.white,
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  curatedTag: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    backgroundColor: COLORS.secondary,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  flashItemName: {
-    fontSize: FONTS.size.xs + 1,
-    color: COLORS.text,
-    marginTop: 8,
-  },
-  flashPriceRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginTop: 4,
-    flexWrap: 'wrap',
-  },
-  flashPrice: {
-    fontSize: FONTS.size.md,
+  dealItemPrice: {
+    fontSize: FONTS.size.sm,
     fontWeight: 'bold',
     color: COLORS.primary,
-    marginRight: 6,
-  },
-  flashOldPrice: {
-    fontSize: FONTS.size.xs,
-    color: COLORS.textMuted,
-    textDecorationLine: 'line-through',
-  },
-  flashSoldText: {
-    fontSize: FONTS.size.xs - 1,
-    color: COLORS.textLight,
-    marginTop: 4,
+    marginTop: 6,
   },
   trustBanner: {
     flexDirection: 'row',
