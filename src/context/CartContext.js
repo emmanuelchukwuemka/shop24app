@@ -81,11 +81,22 @@ export function CartProvider({ children }) {
     setPromoLabel('');
   };
 
+  // Laravel serializes decimal-cast fields (price, discount_rate) as STRINGS in
+  // JSON, not numbers — confirmed directly against the live API. `*` and `/`
+  // coerce strings to numbers automatically, so the discounted branch below has
+  // always produced a real number, but the plain `return item.price` branch
+  // (no discount) was handing back the raw string untouched. `.toLocaleString()`
+  // on a string just returns the string as-is (no comma grouping, no rounding),
+  // so every non-discounted price/variant rendered malformed — and if two
+  // variants happened to differ only in ways masked by that, it could look like
+  // the price "wasn't updating" when picking a different one.
   const getDiscountedPrice = (item) => {
-    if (item.discount_rate > 0) {
-      return item.price * (1 - item.discount_rate / 100);
+    const price = Number(item.price) || 0;
+    const discountRate = Number(item.discount_rate) || 0;
+    if (discountRate > 0) {
+      return price * (1 - discountRate / 100);
     }
-    return item.price;
+    return price;
   };
 
   const cartTotal = cartItems.reduce(

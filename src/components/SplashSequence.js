@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Image, StyleSheet, Dimensions } from 'react-native';
-import { COLORS } from '../styles/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const HOLD_DURATION = 1400; // ms the brand slide stays up before handing off
@@ -42,7 +41,11 @@ export default function SplashSequence({ authReady, onFinish }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.primary,
+    // Matched to assets/5.png's own actual background fill (#C60203, sampled
+    // directly from the image), not COLORS.primary (#B91C1C) — those are two
+    // different reds, and the mismatch was visible as a seam wherever "contain"
+    // mode letterboxes on screens with a different aspect ratio than the image.
+    backgroundColor: '#C60203',
     alignItems: 'center',
     justifyContent: 'center',
   },

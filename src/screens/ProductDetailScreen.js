@@ -13,8 +13,9 @@ import {
   Modal,
   FlatList
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Star, Heart, Share2, Shield, Truck, Award, Search, ShoppingCart, MapPin, Clock } from 'lucide-react-native';
+import { ArrowLeft, Star, Heart, Share2, Shield, Truck, Award, Search, ShoppingCart, MapPin, Clock, FileText, ChevronDown, ChevronUp } from 'lucide-react-native';
 import { COLORS, SPACING, FONTS } from '../styles/theme';
 import { api } from '../services/api';
 import { useCart } from '../context/CartContext';
@@ -24,6 +25,7 @@ import CountdownTimer from '../components/CountdownTimer';
 import ProductCard from '../components/ProductCard';
 import FallbackImage from '../components/FallbackImage';
 import LoadingLogo from '../components/LoadingLogo';
+import Toast from '../components/Toast';
 
 const { width } = Dimensions.get('window');
 
@@ -49,6 +51,9 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [selectedSize, setSelectedSize] = useState(null);
   const [selectedStyle, setSelectedStyle] = useState(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [detailsAccordionOpen, setDetailsAccordionOpen] = useState(true);
+  const [reviewsAccordionOpen, setReviewsAccordionOpen] = useState(false);
+  const [toastVisible, setToastVisible] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
   const previewListRef = useRef(null);
@@ -149,8 +154,12 @@ export default function ProductDetailScreen({ route, navigation }) {
   const colorImage = colorOptions.length > 0
     ? variants.find((v) => v.color === selectedColor && v.image_url)?.image_url
     : null;
-  const imagesList = colorImage && !baseImages.includes(colorImage)
-    ? [colorImage, ...baseImages]
+  // Always move it to the front, whether or not it's already somewhere in the
+  // base gallery — a product whose gallery already includes every variant's
+  // photo (very common: vendor just uploads all of them) would otherwise never
+  // visibly reorder, since the old check only prepended when it was *missing*.
+  const imagesList = colorImage
+    ? [colorImage, ...baseImages.filter((img) => img !== colorImage)]
     : baseImages;
 
   const cartProduct = () => ({
@@ -162,7 +171,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   const handleAddToCart = () => {
     addToCart(cartProduct(), quantity);
-    Alert.alert('Success', `${product.name} added to cart!`);
+    setToastVisible(true);
   };
 
   const handleBuyNow = () => {
@@ -289,18 +298,29 @@ export default function ProductDetailScreen({ route, navigation }) {
             ))}
           </ScrollView>
           
-          {/* Pagination Indicators */}
-          {imagesList.length > 1 && (
-            <View style={styles.pagination}>
-              {imagesList.map((_, idx) => (
-                <View 
-                  key={idx} 
-                  style={[styles.paginationDot, activeImageIndex === idx && styles.activePaginationDot]} 
-                />
-              ))}
-            </View>
-          )}
         </View>
+
+        {/* Thumbnail strip — tap to jump the swiper above to that image */}
+        {imagesList.length > 1 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.thumbnailRow}
+          >
+            {imagesList.map((img, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={[styles.thumbnailWrap, activeImageIndex === idx && styles.thumbnailWrapActive]}
+                onPress={() => {
+                  setActiveImageIndex(idx);
+                  swiperRef.current?.scrollTo({ x: idx * width, animated: true });
+                }}
+              >
+                <FallbackImage uri={img} style={styles.thumbnailImage} iconSize={14} />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
 
         {/* Temu-style Price and Flash Sale Alert Box */}
         <View style={styles.priceSection}>
@@ -339,16 +359,23 @@ export default function ProductDetailScreen({ route, navigation }) {
 
         {/* Title and Ratings */}
         <View style={styles.titleSection}>
-          <Text style={styles.productTitle}>{product.name}</Text>
-          
+          <View style={styles.titleRow}>
+            <Text style={[styles.productTitle, { flex: 1 }]}>{product.name}</Text>
+            <View style={[styles.stockBadge, outOfStock && styles.stockBadgeOut]}>
+              <Text style={[styles.stockBadgeText, outOfStock && styles.stockBadgeTextOut]}>
+                {outOfStock ? 'Out of Stock' : 'In Stock'}
+              </Text>
+            </View>
+          </View>
+
           <View style={styles.ratingsRow}>
             <View style={styles.starsBox}>
               {[1, 2, 3, 4, 5].map((s) => (
-                <Star 
-                  key={s} 
-                  size={14} 
-                  fill={s <= Math.round(product.rating) ? COLORS.accent : 'transparent'} 
-                  color={COLORS.accent} 
+                <Star
+                  key={s}
+                  size={14}
+                  fill={s <= Math.round(product.rating) ? COLORS.accent : 'transparent'}
+                  color={COLORS.accent}
                 />
               ))}
               <Text style={styles.ratingScore}>{product.rating}</Text>
@@ -367,7 +394,10 @@ export default function ProductDetailScreen({ route, navigation }) {
           { dimension: 'size', label: 'Size', options: sizeOptions, selected: selectedSize, onSelect: setSelectedSize },
           { dimension: 'style', label: 'Style', options: styleOptions, selected: selectedStyle, onSelect: setSelectedStyle },
         ].map(({ dimension, label, options, selected, onSelect }) => {
-          if (options.length === 0) return null;
+          // Hide the whole row unless there's more than one value to actually
+          // choose between — a single value (e.g. every product's auto-created
+          // "Default"/"Standard" placeholder) isn't a real choice.
+          if (options.length <= 1) return null;
           return (
             <View key={dimension} style={styles.variantSection}>
               <Text style={styles.variantLabel}>{label}{selected ? `: ${selected}` : ''}</Text>
@@ -397,27 +427,48 @@ export default function ProductDetailScreen({ route, navigation }) {
           );
         })}
 
-        {/* Trust Badges Panel */}
+        {/* Trust Badges — three equal columns, icon above text */}
         <View style={styles.trustSection}>
-          <View style={styles.trustRow}>
-            <Truck size={16} color={COLORS.primary} />
-            <Text style={styles.trustText}>Free Shipping on all orders</Text>
+          <View style={styles.trustColumnsRow}>
+            <View style={styles.trustColumn}>
+              <Truck size={18} color={COLORS.primary} />
+              <Text style={styles.trustColumnText}>Free Shipping{'\n'}on all orders</Text>
+            </View>
+            <View style={styles.trustColumnDivider} />
+            <View style={styles.trustColumn}>
+              <Shield size={18} color={COLORS.success} />
+              <Text style={styles.trustColumnText}>30-Day Return{'\n'}& Secure Checkout</Text>
+            </View>
+            <View style={styles.trustColumnDivider} />
+            <View style={styles.trustColumn}>
+              <Award size={18} color="#FF9900" />
+              <Text style={styles.trustColumnText}>Shipped from{'\n'}{product.store_name || 'Shop24'}</Text>
+            </View>
           </View>
-          <View style={styles.trustRow}>
-            <Shield size={16} color={COLORS.success} />
-            <Text style={styles.trustText}>30-Day Return & Secure Checkout</Text>
-          </View>
-          <View style={styles.trustRow}>
-            <Award size={16} color="#FF9900" />
-            <Text style={styles.trustText}>Shipped from {product.store_name || 'Shop24 Factory'}</Text>
-          </View>
-          <View style={styles.trustRow}>
-            <MapPin size={16} color={COLORS.textLight} />
-            <Text style={styles.trustText}>Delivered via GIG, 2 Seconds Logistics & Red Star</Text>
-          </View>
-          <View style={styles.trustRow}>
-            <Clock size={16} color={COLORS.textLight} />
-            <Text style={styles.trustText}>Estimated Delivery: 7-14 days</Text>
+
+          {/* Delivery partners — a proper panel with the real courier logos,
+              not just a text line. */}
+          <View style={styles.deliveryPartnersPanel}>
+            <View style={styles.deliveryPartnersHeader}>
+              <View style={styles.deliveryPartnersHeaderLeft}>
+                <MapPin size={14} color={COLORS.primary} />
+                <Text style={styles.deliveryPartnersTitle}>Delivered via Our Trusted Partners</Text>
+              </View>
+              <Text style={styles.deliveryPartnersTagline}>Fast. Safe. Reliable.</Text>
+            </View>
+            <View style={styles.deliveryLogosRow}>
+              <Image source={require('../../assets/gig-logo.png')} style={styles.deliveryLogo} contentFit="contain" />
+              <View style={styles.deliveryLogoDivider} />
+              <Image source={require('../../assets/2seconds-logo.png')} style={styles.deliveryLogo} contentFit="contain" />
+              <View style={styles.deliveryLogoDivider} />
+              <Image source={require('../../assets/redstar-logo.png')} style={styles.deliveryLogo} contentFit="contain" />
+            </View>
+            <View style={styles.deliveryEstimateRow}>
+              <Clock size={14} color={COLORS.textLight} />
+              <Text style={styles.deliveryEstimateText}>
+                Estimated Delivery: {product.delivery_time || '7-14 days'}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -443,34 +494,61 @@ export default function ProductDetailScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Description Panel */}
-        <View style={styles.descriptionSection}>
-          <Text style={styles.sectionHeader}>Product Details</Text>
-          <Text
-            style={styles.descriptionBody}
-            numberOfLines={descriptionExpanded ? undefined : 2}
-          >
-            {product.description}
-          </Text>
-          <TouchableOpacity onPress={() => setDescriptionExpanded((v) => !v)}>
-            <Text style={styles.readMoreLink}>{descriptionExpanded ? 'Read less' : 'Read more'}</Text>
-          </TouchableOpacity>
-          <View style={styles.specificationsTable}>
-            <View style={styles.specRow}>
-              <Text style={styles.specLabel}>Delivery Time</Text>
-              <Text style={styles.specValue}>{product.delivery_time || '5-10 business days'}</Text>
-            </View>
-            <View style={[styles.specRow, { borderBottomWidth: 0 }]}>
-              <Text style={styles.specLabel}>Merchant</Text>
-              <Text style={styles.specValue}>{product.store_name || 'Genuine Seller'}</Text>
+        {/* Product Details — collapsible, like Customer Reviews below */}
+        <TouchableOpacity
+          style={styles.accordionHeader}
+          onPress={() => setDetailsAccordionOpen((v) => !v)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.accordionHeaderLeft}>
+            <FileText size={16} color={COLORS.text} />
+            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Product Details</Text>
+          </View>
+          {detailsAccordionOpen
+            ? <ChevronUp size={18} color={COLORS.textLight} />
+            : <ChevronDown size={18} color={COLORS.textLight} />}
+        </TouchableOpacity>
+        {detailsAccordionOpen && (
+          <View style={styles.descriptionSection}>
+            <Text
+              style={styles.descriptionBody}
+              numberOfLines={descriptionExpanded ? undefined : 2}
+            >
+              {product.description}
+            </Text>
+            <TouchableOpacity onPress={() => setDescriptionExpanded((v) => !v)}>
+              <Text style={styles.readMoreLink}>{descriptionExpanded ? 'Read less' : 'Read more'}</Text>
+            </TouchableOpacity>
+            <View style={styles.specificationsTable}>
+              <View style={styles.specRow}>
+                <Text style={styles.specLabel}>Delivery Time</Text>
+                <Text style={styles.specValue}>{product.delivery_time || '5-10 business days'}</Text>
+              </View>
+              <View style={[styles.specRow, { borderBottomWidth: 0 }]}>
+                <Text style={styles.specLabel}>Merchant</Text>
+                <Text style={styles.specValue}>{product.store_name || 'Genuine Seller'}</Text>
+              </View>
             </View>
           </View>
-        </View>
+        )}
 
-        {/* Reviews Section */}
+        {/* Customer Reviews — collapsible */}
+        <TouchableOpacity
+          style={styles.accordionHeader}
+          onPress={() => setReviewsAccordionOpen((v) => !v)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.accordionHeaderLeft}>
+            <Star size={16} color={COLORS.text} />
+            <Text style={[styles.sectionHeader, { marginBottom: 0 }]}>Customer Reviews ({product.reviews?.length || 0})</Text>
+          </View>
+          {reviewsAccordionOpen
+            ? <ChevronUp size={18} color={COLORS.textLight} />
+            : <ChevronDown size={18} color={COLORS.textLight} />}
+        </TouchableOpacity>
+        {reviewsAccordionOpen && (
         <View style={styles.reviewsSection}>
-          <View style={styles.reviewsSectionHeader}>
-            <Text style={styles.sectionHeader}>Customer Reviews ({product.reviews?.length || 0})</Text>
+          <View style={[styles.reviewsSectionHeader, { justifyContent: 'flex-end' }]}>
             <TouchableOpacity onPress={() => setShowReviewForm((v) => !v)}>
               <Text style={styles.writeReviewLink}>{showReviewForm ? 'Cancel' : 'Write a Review'}</Text>
             </TouchableOpacity>
@@ -540,6 +618,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             )
           )}
         </View>
+        )}
 
         {/* Similar Products - continues the feed below the product, like the website */}
         {product.similar_products && product.similar_products.length > 0 && (
@@ -581,6 +660,13 @@ export default function ProductDetailScreen({ route, navigation }) {
           <Text style={styles.buyNowText}>Buy Now</Text>
         </TouchableOpacity>
       </View>
+
+      <Toast
+        visible={toastVisible}
+        message="Added to cart"
+        onHide={() => setToastVisible(false)}
+        bottom={90 + Math.max(insets.bottom, SPACING.md)}
+      />
 
       {/* Full-screen image preview — opens on tapping the product image */}
       <Modal visible={previewVisible} animationType="fade" onRequestClose={() => setPreviewVisible(false)}>
@@ -699,24 +785,26 @@ const styles = StyleSheet.create({
     width: width,
     height: 360,
   },
-  pagination: {
-    position: 'absolute',
-    bottom: SPACING.md,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  paginationDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-    marginHorizontal: 3,
-  },
-  activePaginationDot: {
-    width: 14,
+  thumbnailRow: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
     backgroundColor: COLORS.white,
+    gap: SPACING.sm,
+  },
+  thumbnailWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+  },
+  thumbnailWrapActive: {
+    borderColor: COLORS.primary,
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
   },
   priceSection: {
     backgroundColor: COLORS.white,
@@ -788,6 +876,28 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: SPACING.xs,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+  },
+  stockBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  stockBadgeOut: {
+    backgroundColor: '#F5F5F7',
+  },
+  stockBadgeText: {
+    fontSize: FONTS.size.xs - 1,
+    fontWeight: 'bold',
+    color: COLORS.success,
+  },
+  stockBadgeTextOut: {
+    color: COLORS.textMuted,
+  },
   ratingsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -854,16 +964,86 @@ const styles = StyleSheet.create({
     borderBottomWidth: 8,
     borderBottomColor: '#F5F5F7',
   },
-  trustRow: {
+  trustColumnsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  trustColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  trustColumnDivider: {
+    width: 1,
+    alignSelf: 'stretch',
+    backgroundColor: COLORS.border,
+    marginVertical: 2,
+  },
+  trustColumnText: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.textLight,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  deliveryPartnersPanel: {
+    marginTop: SPACING.md,
+    padding: SPACING.sm,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#FAFAFA',
+  },
+  deliveryPartnersHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  deliveryPartnersHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 4,
+    gap: 6,
+    flexShrink: 1,
   },
-  trustText: {
+  deliveryPartnersTitle: {
     fontSize: FONTS.size.xs + 1,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    flexShrink: 1,
+  },
+  deliveryPartnersTagline: {
+    fontSize: FONTS.size.xs - 1,
     color: COLORS.textLight,
-    marginLeft: SPACING.sm,
-    fontWeight: '500',
+  },
+  deliveryLogosRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: SPACING.xs,
+  },
+  deliveryLogo: {
+    flex: 1,
+    height: 28,
+  },
+  deliveryLogoDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: COLORS.border,
+    marginHorizontal: SPACING.sm,
+  },
+  deliveryEstimateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: SPACING.xs,
+    paddingTop: SPACING.xs,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  deliveryEstimateText: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.textLight,
   },
   quantitySection: {
     backgroundColor: COLORS.white,
@@ -907,9 +1087,25 @@ const styles = StyleSheet.create({
     fontSize: FONTS.size.sm,
     fontWeight: 'bold',
   },
+  accordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: '#F5F5F7',
+  },
+  accordionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
   descriptionSection: {
     backgroundColor: COLORS.white,
     padding: SPACING.md,
+    paddingTop: 0,
   },
   sectionHeader: {
     fontSize: FONTS.size.sm,
