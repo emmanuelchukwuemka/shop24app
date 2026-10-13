@@ -22,9 +22,10 @@ export default function CountdownTimer({ endTime }) {
         seconds: seconds < 10 ? `0${seconds}` : `${seconds}`,
       };
 
-      
+
     };
 
+    
     setTimeLeft(calculateTime());
 
     const timer = setInterval(() => {

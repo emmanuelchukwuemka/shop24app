@@ -39,6 +39,7 @@ export default function FallbackImage({ uri, style, resizeMode = 'cover', iconSi
           <Image
             source={require('../../assets/logo.png')}
             contentFit="contain"
+            tintColor={COLORS.textMuted}
             style={styles.loadingLogo}
           />
         </View>
@@ -57,8 +58,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingLogo: {
-    width: '40%',
-    height: '40%',
-    opacity: 0.5,
+    width: '25%',
+    height: '25%',
+    opacity: 0.3,
   },
 });

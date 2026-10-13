@@ -29,6 +29,11 @@ import Toast from '../components/Toast';
 
 const { width } = Dimensions.get('window');
 
+// Single shared fallback so the delivery-partner panel and the Product Details
+// table can never show two different guesses when a vendor hasn't set a real
+// product.delivery_time — both read from here instead of hardcoding their own.
+const DEFAULT_DELIVERY_TIME = '5-10 business days';
+
 export default function ProductDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { productId } = route.params;
@@ -44,12 +49,19 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
-  // Color/size/style are independently selectable (like the reference AliExpress-style
-  // picker) — the exact combination of all three resolves to one ProductVariant, with
-  // its own price/stock, computed below rather than stored directly.
+  // Color/size/style/material/storage-capacity are independently selectable (like the
+  // reference AliExpress-style picker) — the exact combination resolves to one
+  // ProductVariant/SKU, with its own price/stock/image, computed below rather than
+  // stored directly.
   const [selectedColor, setSelectedColor] = useState(null);
   const [selectedSize, setSelectedSize] = useState(null);
   const [selectedStyle, setSelectedStyle] = useState(null);
+  const [selectedMaterial, setSelectedMaterial] = useState(null);
+  const [selectedStorageCapacity, setSelectedStorageCapacity] = useState(null);
+  // Unlimited open-ended dimensions beyond the fixed five — one map entry per
+  // vendor-named label (e.g. "Scent", "Voltage") this product's variants actually
+  // use, instead of a single fixed slot.
+  const [customSelections, setCustomSelections] = useState({});
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [detailsAccordionOpen, setDetailsAccordionOpen] = useState(true);
   const [reviewsAccordionOpen, setReviewsAccordionOpen] = useState(false);
@@ -91,6 +103,9 @@ export default function ProductDetailScreen({ route, navigation }) {
         setSelectedColor(defaultVariant?.color ?? null);
         setSelectedSize(defaultVariant?.size ?? null);
         setSelectedStyle(defaultVariant?.style ?? null);
+        setSelectedMaterial(defaultVariant?.material ?? null);
+        setSelectedStorageCapacity(defaultVariant?.storage_capacity ?? null);
+        setCustomSelections({ ...(defaultVariant?.customAttrs || {}) });
       } catch (e) {
         console.error(e);
         Alert.alert('Error', 'Failed to load product details.');
@@ -111,34 +126,66 @@ export default function ProductDetailScreen({ route, navigation }) {
   }
 
   const variants = product.variants || [];
+
+  // Fixed dimensions live as plain variant properties; anything else is an
+  // unlimited, vendor-named custom dimension (e.g. "Scent", "Voltage") living in
+  // each variant's flattened customAttrs map — discovered from the data itself
+  // (whatever labels this product's variants actually use), not hardcoded.
+  const FIXED_DIMENSION_KEYS = ['color', 'size', 'style', 'material', 'storage_capacity'];
+  const getDimValue = (v, key) => (FIXED_DIMENSION_KEYS.includes(key) ? v[key] : (v.customAttrs || {})[key]);
+  const customLabels = [...new Set(variants.flatMap((v) => Object.keys(v.customAttrs || {})))];
+
+  // Every independent variant dimension the picker supports — a SKU is the exact
+  // combination of whichever of these a product actually uses.
+  const DIMENSIONS = [
+    { key: 'color', label: 'Color', selected: selectedColor, onSelect: setSelectedColor },
+    { key: 'size', label: 'Size', selected: selectedSize, onSelect: setSelectedSize },
+    { key: 'style', label: 'Style', selected: selectedStyle, onSelect: setSelectedStyle },
+    { key: 'material', label: 'Material', selected: selectedMaterial, onSelect: setSelectedMaterial },
+    { key: 'storage_capacity', label: 'Storage/Capacity', selected: selectedStorageCapacity, onSelect: setSelectedStorageCapacity },
+    ...customLabels.map((label) => ({
+      key: label,
+      label,
+      selected: customSelections[label] ?? null,
+      onSelect: (value) => setCustomSelections((prev) => ({ ...prev, [label]: value })),
+    })),
+  ];
+
   // Distinct values per dimension, in first-seen order. A dimension's row only
   // renders at all if at least one variant actually sets it (e.g. most products
-  // have no "style", so that row just doesn't show).
-  const colorOptions = [...new Set(variants.map((v) => v.color).filter(Boolean))];
-  const sizeOptions = [...new Set(variants.map((v) => v.size).filter(Boolean))];
-  const styleOptions = [...new Set(variants.map((v) => v.style).filter(Boolean))];
+  // have no "style" or "material", so those rows just don't show).
+  const optionsFor = (key) => [...new Set(variants.map((v) => getDimValue(v, key)).filter(Boolean))];
+  const dimensionsWithOptions = DIMENSIONS.map((d) => ({ ...d, options: optionsFor(d.key) }));
+
+  // One representative photo per color (if the vendor set one) — shown as a
+  // swatch thumbnail on its chip instead of plain text, mirroring the website.
+  const colorImages = {};
+  variants.forEach((v) => {
+    if (v.color && v.image_url && !colorImages[v.color]) colorImages[v.color] = v.image_url;
+  });
 
   // The one variant matching every currently-selected dimension — dimensions the
-  // product doesn't use at all (empty options list) are ignored in the match.
+  // product doesn't use at all (empty options list) are ignored in the match. This
+  // is the SKU lookup: an exact combination match, never a guess or substitution.
   const selectedVariant = variants.find((v) =>
-    (colorOptions.length === 0 || v.color === selectedColor) &&
-    (sizeOptions.length === 0 || v.size === selectedSize) &&
-    (styleOptions.length === 0 || v.style === selectedStyle)
+    dimensionsWithOptions.every((d) => d.options.length === 0 || getDimValue(v, d.key) === d.selected)
   ) || null;
 
-  // Is `value` (in `dimension`) still reachable in-stock given the OTHER two
-  // dimensions' current selections? Drives which chips render as disabled.
-  const isOptionAvailable = (dimension, value) =>
+  // Is `value` (in dimension `key`) still reachable in-stock given every OTHER
+  // dimension's current selection? Drives which chips render as disabled — a
+  // combination that was never created by the vendor is never guessed at.
+  const isOptionAvailable = (key, value) =>
     variants.some((v) => {
       if (v.stock <= 0) return false;
-      if (dimension !== 'color' && colorOptions.length > 0 && v.color !== selectedColor) return false;
-      if (dimension !== 'size' && sizeOptions.length > 0 && v.size !== selectedSize) return false;
-      if (dimension !== 'style' && styleOptions.length > 0 && v.style !== selectedStyle) return false;
-      return v[dimension] === value;
+      return dimensionsWithOptions.every((d) => {
+        if (d.key === key) return getDimValue(v, d.key) === value;
+        if (d.options.length === 0) return true;
+        return getDimValue(v, d.key) === d.selected;
+      });
     });
 
   const variantLabel = selectedVariant
-    ? [selectedVariant.color, selectedVariant.size, selectedVariant.style].filter(Boolean).join(' / ')
+    ? DIMENSIONS.map((d) => getDimValue(selectedVariant, d.key)).filter(Boolean).join(' / ')
     : null;
   const priceSource = { price: selectedVariant?.price ?? product.price, discount_rate: product.discount_rate };
   const discountedPrice = getDiscountedPrice(priceSource);
@@ -151,7 +198,7 @@ export default function ProductDetailScreen({ route, navigation }) {
   const baseImages = Array.isArray(product.images) && product.images.length > 0
     ? product.images
     : [product.image_url];
-  const colorImage = colorOptions.length > 0
+  const colorImage = optionsFor('color').length > 0
     ? variants.find((v) => v.color === selectedColor && v.image_url)?.image_url
     : null;
   // Always move it to the front, whether or not it's already somewhere in the
@@ -384,27 +431,50 @@ export default function ProductDetailScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Variant Picker — Color, Size, and Style are independent rows, each only
-            shown when the product actually uses that dimension (most products have
-            no "style" at all, for instance). A chip is disabled when there's no
-            in-stock combination reachable from it given what's already selected
-            in the other two rows. */}
-        {[
-          { dimension: 'color', label: 'Color', options: colorOptions, selected: selectedColor, onSelect: setSelectedColor },
-          { dimension: 'size', label: 'Size', options: sizeOptions, selected: selectedSize, onSelect: setSelectedSize },
-          { dimension: 'style', label: 'Style', options: styleOptions, selected: selectedStyle, onSelect: setSelectedStyle },
-        ].map(({ dimension, label, options, selected, onSelect }) => {
+        {/* Variant Picker — Color, Size, Style, Material, and Storage/Capacity are
+            independent rows, each only shown when the product actually uses that
+            dimension (most products use only a couple of these). A chip is disabled
+            when there's no in-stock combination reachable from it given what's
+            already selected in the other rows — never guessed or substituted. */}
+        {dimensionsWithOptions.map(({ key, label, options, selected, onSelect }) => {
           // Hide the whole row unless there's more than one value to actually
           // choose between — a single value (e.g. every product's auto-created
           // "Default"/"Standard" placeholder) isn't a real choice.
           if (options.length <= 1) return null;
           return (
-            <View key={dimension} style={styles.variantSection}>
+            <View key={key} style={styles.variantSection}>
               <Text style={styles.variantLabel}>{label}{selected ? `: ${selected}` : ''}</Text>
               <View style={styles.variantChipsRow}>
                 {options.map((value) => {
                   const isSelected = selected === value;
-                  const isAvailable = isOptionAvailable(dimension, value);
+                  const isAvailable = isOptionAvailable(key, value);
+                  const swatchImage = key === 'color' ? colorImages[value] : null;
+                  if (swatchImage) {
+                    return (
+                      <TouchableOpacity
+                        key={value}
+                        style={styles.variantSwatchChip}
+                        onPress={() => onSelect(value)}
+                        disabled={!isAvailable}
+                      >
+                        <Image
+                          source={{ uri: swatchImage }}
+                          style={[
+                            styles.variantSwatchThumb,
+                            isSelected && styles.variantSwatchThumbSelected,
+                            !isAvailable && styles.variantSwatchThumbDisabled,
+                          ]}
+                          contentFit="cover"
+                        />
+                        <Text
+                          style={[styles.variantSwatchLabel, isSelected && styles.variantChipTextSelected]}
+                          numberOfLines={1}
+                        >
+                          {value}{!isAvailable ? ' (Sold out)' : ''}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }
                   return (
                     <TouchableOpacity
                       key={value}
@@ -426,6 +496,11 @@ export default function ProductDetailScreen({ route, navigation }) {
             </View>
           );
         })}
+
+        {/* SKU of the resolved combination — only once a full valid selection exists */}
+        {!!selectedVariant?.sku && (
+          <Text style={styles.skuText}>SKU: {selectedVariant.sku}</Text>
+        )}
 
         {/* Trust Badges — three equal columns, icon above text */}
         <View style={styles.trustSection}>
@@ -466,7 +541,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             <View style={styles.deliveryEstimateRow}>
               <Clock size={14} color={COLORS.textLight} />
               <Text style={styles.deliveryEstimateText}>
-                Estimated Delivery: {product.delivery_time || '7-14 days'}
+                Estimated Delivery: {product.delivery_time || DEFAULT_DELIVERY_TIME}
               </Text>
             </View>
           </View>
@@ -522,7 +597,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             <View style={styles.specificationsTable}>
               <View style={styles.specRow}>
                 <Text style={styles.specLabel}>Delivery Time</Text>
-                <Text style={styles.specValue}>{product.delivery_time || '5-10 business days'}</Text>
+                <Text style={styles.specValue}>{product.delivery_time || DEFAULT_DELIVERY_TIME}</Text>
               </View>
               <View style={[styles.specRow, { borderBottomWidth: 0 }]}>
                 <Text style={styles.specLabel}>Merchant</Text>
@@ -640,6 +715,23 @@ export default function ProductDetailScreen({ route, navigation }) {
         )}
       </ScrollView>
 
+      {/* Floating cart shortcut — visible as soon as the product page opens,
+          mirroring the same bubble already used in the full-screen image
+          preview below. Tapping it jumps straight to the cart. */}
+      <TouchableOpacity
+        style={[styles.previewCartBubble, { bottom: Math.max(insets.bottom, SPACING.md) + 90 }]}
+        onPress={() => navigation.navigate('MainTabs', { screen: 'CartTab' })}
+        activeOpacity={0.85}
+      >
+        <ShoppingCart size={18} color={COLORS.white} />
+        {cartCount > 0 && (
+          <View style={styles.previewCartBadge}>
+            <Text style={styles.previewCartBadgeText}>{cartCount}</Text>
+          </View>
+        )}
+        <Text style={styles.previewCartFreeShipText}>Free{'\n'}shipping</Text>
+      </TouchableOpacity>
+
       {/* Bottom Sticky Action Bar */}
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
         <TouchableOpacity
@@ -665,7 +757,6 @@ export default function ProductDetailScreen({ route, navigation }) {
         visible={toastVisible}
         message="Added to cart"
         onHide={() => setToastVisible(false)}
-        bottom={90 + Math.max(insets.bottom, SPACING.md)}
       />
 
       {/* Full-screen image preview — opens on tapping the product image */}
@@ -707,9 +798,9 @@ export default function ProductDetailScreen({ route, navigation }) {
             )}
           />
 
-          {colorOptions.length > 1 && (
+          {optionsFor('color').length > 1 && (
             <View style={styles.previewColorPill}>
-              <Text style={styles.previewColorPillText}>{colorOptions.length} Color</Text>
+              <Text style={styles.previewColorPillText}>{optionsFor('color').length} Color</Text>
             </View>
           )}
 
@@ -948,6 +1039,37 @@ const styles = StyleSheet.create({
   },
   variantChipDisabled: {
     opacity: 0.5,
+  },
+  variantSwatchChip: {
+    alignItems: 'center',
+    width: 68,
+    gap: 4,
+  },
+  variantSwatchThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F7',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  variantSwatchThumbSelected: {
+    borderColor: COLORS.primary,
+  },
+  variantSwatchThumbDisabled: {
+    opacity: 0.4,
+  },
+  variantSwatchLabel: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.text,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  skuText: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.textMuted,
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.sm,
   },
   variantChipText: {
     fontSize: FONTS.size.xs + 1,

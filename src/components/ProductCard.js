@@ -6,7 +6,9 @@ import { COLORS, SPACING, FONTS } from '../styles/theme';
 import { useCart } from '../context/CartContext';
 import FallbackImage from './FallbackImage';
 
-const variantLabel = (v) => [v.color, v.size, v.style].filter(Boolean).join(' / ') || `Option ${v.id}`;
+const variantLabel = (v) =>
+  [v.color, v.size, v.style, v.material, v.storage_capacity, ...Object.values(v.customAttrs || {})]
+    .filter(Boolean).join(' / ') || `Option ${v.id}`;
 
 export default function ProductCard({ product, matchFirstRowHeight }) {
   const navigation = useNavigation();
