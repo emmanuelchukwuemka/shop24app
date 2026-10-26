@@ -15,7 +15,11 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Star, Heart, Share2, Shield, Truck, Award, Search, ShoppingCart, MapPin, Clock, FileText, ChevronDown, ChevronUp } from 'lucide-react-native';
+import {
+  ArrowLeft, Star, Heart, Share2, Shield, Truck, Award, Search,
+  ShoppingCart, MapPin, Clock, FileText, ChevronDown, ChevronUp,
+  ChevronRight, Check, X, Minus, Plus
+} from 'lucide-react-native';
 import { COLORS, SPACING, FONTS } from '../styles/theme';
 import { api } from '../services/api';
 import { useCart } from '../context/CartContext';
@@ -66,6 +70,7 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [detailsAccordionOpen, setDetailsAccordionOpen] = useState(true);
   const [reviewsAccordionOpen, setReviewsAccordionOpen] = useState(false);
   const [toastVisible, setToastVisible] = useState(false);
+  const [variantSheetVisible, setVariantSheetVisible] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
   const previewListRef = useRef(null);
@@ -209,6 +214,8 @@ export default function ProductDetailScreen({ route, navigation }) {
     ? [colorImage, ...baseImages.filter((img) => img !== colorImage)]
     : baseImages;
 
+  const hasMultipleOptions = dimensionsWithOptions.some((d) => d.options.length > 1);
+
   const cartProduct = () => ({
     ...product,
     price: priceSource.price,
@@ -224,6 +231,32 @@ export default function ProductDetailScreen({ route, navigation }) {
   const handleBuyNow = () => {
     addToCart(cartProduct(), quantity);
     navigation.navigate('MainTabs', { screen: 'CartTab' });
+  };
+
+  const handleSheetConfirm = (action) => {
+    if (outOfStock) return;
+    setVariantSheetVisible(false);
+    if (action === 'buy') {
+      handleBuyNow();
+    } else {
+      handleAddToCart();
+    }
+  };
+
+  const onAddToCartPress = () => {
+    if (hasMultipleOptions) {
+      setVariantSheetVisible(true);
+    } else {
+      handleAddToCart();
+    }
+  };
+
+  const onBuyNowPress = () => {
+    if (hasMultipleOptions) {
+      setVariantSheetVisible(true);
+    } else {
+      handleBuyNow();
+    }
   };
 
   const handleShare = async () => {
@@ -431,71 +464,58 @@ export default function ProductDetailScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Variant Picker — Color, Size, Style, Material, and Storage/Capacity are
-            independent rows, each only shown when the product actually uses that
-            dimension (most products use only a couple of these). A chip is disabled
-            when there's no in-stock combination reachable from it given what's
-            already selected in the other rows — never guessed or substituted. */}
-        {dimensionsWithOptions.map(({ key, label, options, selected, onSelect }) => {
-          // Hide the whole row unless there's more than one value to actually
-          // choose between — a single value (e.g. every product's auto-created
-          // "Default"/"Standard" placeholder) isn't a real choice.
-          if (options.length <= 1) return null;
-          return (
-            <View key={key} style={styles.variantSection}>
-              <Text style={styles.variantLabel}>{label}{selected ? `: ${selected}` : ''}</Text>
-              <View style={styles.variantChipsRow}>
-                {options.map((value) => {
-                  const isSelected = selected === value;
-                  const isAvailable = isOptionAvailable(key, value);
-                  const swatchImage = key === 'color' ? colorImages[value] : null;
-                  if (swatchImage) {
-                    return (
-                      <TouchableOpacity
-                        key={value}
-                        style={styles.variantSwatchChip}
-                        onPress={() => onSelect(value)}
-                        disabled={!isAvailable}
-                      >
-                        <Image
-                          source={{ uri: swatchImage }}
-                          style={[
-                            styles.variantSwatchThumb,
-                            isSelected && styles.variantSwatchThumbSelected,
-                            !isAvailable && styles.variantSwatchThumbDisabled,
-                          ]}
-                          contentFit="cover"
-                        />
-                        <Text
-                          style={[styles.variantSwatchLabel, isSelected && styles.variantChipTextSelected]}
-                          numberOfLines={1}
-                        >
-                          {value}{!isAvailable ? ' (Sold out)' : ''}
-                        </Text>
-                      </TouchableOpacity>
+        {/* Temu-style Variant Trigger Row — tapping opens the bottom sheet picker */}
+        {hasMultipleOptions && (
+          <TouchableOpacity
+            style={styles.variantTriggerRow}
+            onPress={() => setVariantSheetVisible(true)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.variantTriggerLeft}>
+              {/* Mini color swatch row — up to 4 thumbnails */}
+              {optionsFor('color').length > 1 && (
+                <View style={styles.variantTriggerSwatches}>
+                  {optionsFor('color').slice(0, 4).map((c) => {
+                    const img = colorImages[c];
+                    return img ? (
+                      <Image
+                        key={c}
+                        source={{ uri: img }}
+                        style={[
+                          styles.variantTriggerSwatchThumb,
+                          selectedColor === c && styles.variantTriggerSwatchSelected,
+                        ]}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <View key={c} style={[
+                        styles.variantTriggerSwatchCircle,
+                        selectedColor === c && styles.variantTriggerSwatchSelected,
+                      ]} />
                     );
-                  }
-                  return (
-                    <TouchableOpacity
-                      key={value}
-                      style={[
-                        styles.variantChip,
-                        isSelected && styles.variantChipSelected,
-                        !isAvailable && styles.variantChipDisabled,
-                      ]}
-                      onPress={() => onSelect(value)}
-                      disabled={!isAvailable}
-                    >
-                      <Text style={[styles.variantChipText, isSelected && styles.variantChipTextSelected]}>
-                        {value}{!isAvailable ? ' (Sold out)' : ''}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                  })}
+                  {optionsFor('color').length > 4 && (
+                    <Text style={styles.variantTriggerMore}>+{optionsFor('color').length - 4}</Text>
+                  )}
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.variantTriggerTitle}>
+                  {dimensionsWithOptions
+                    .filter((d) => d.options.length > 1)
+                    .map((d) => d.selected ? `${d.label}: ${d.selected}` : d.label)
+                    .join('  ·  ')}
+                </Text>
+                <Text style={styles.variantTriggerSub}>
+                  {selectedVariant
+                    ? (selectedVariant.stock > 0 ? `${selectedVariant.stock} in stock` : 'Sold out')
+                    : 'Tap to select options'}
+                </Text>
               </View>
             </View>
-          );
-        })}
+            <ChevronRight size={18} color={COLORS.textLight} />
+          </TouchableOpacity>
+        )}
 
         {/* SKU of the resolved combination — only once a full valid selection exists */}
         {!!selectedVariant?.sku && (
@@ -736,7 +756,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
         <TouchableOpacity
           style={[styles.addToCartBtn, outOfStock && styles.disabledBtn]}
-          onPress={handleAddToCart}
+          onPress={onAddToCartPress}
           activeOpacity={0.8}
           disabled={outOfStock}
         >
@@ -745,7 +765,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
         <TouchableOpacity
           style={[styles.buyNowBtn, outOfStock && styles.disabledBtn]}
-          onPress={handleBuyNow}
+          onPress={onBuyNowPress}
           activeOpacity={0.8}
           disabled={outOfStock}
         >
@@ -758,6 +778,165 @@ export default function ProductDetailScreen({ route, navigation }) {
         message="Added to cart"
         onHide={() => setToastVisible(false)}
       />
+
+      {/* ============ Temu-style Variant Bottom Sheet ============ */}
+      <Modal
+        visible={variantSheetVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setVariantSheetVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.sheetOverlay}
+          activeOpacity={1}
+          onPress={() => setVariantSheetVisible(false)}
+        />
+        <View style={[styles.sheetContainer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          {/* Sheet Header — product thumbnail + live price */}
+          <View style={styles.sheetHeader}>
+            <FallbackImage uri={imagesList[0]} style={styles.sheetHeaderImage} iconSize={20} />
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={styles.sheetPrice}>
+                  ₦{discountedPrice.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                </Text>
+                {hasDiscount && (
+                  <Text style={styles.sheetOldPrice}>
+                    ₦{product.price.toLocaleString(undefined, { minimumFractionDigits: 0 })}
+                  </Text>
+                )}
+              </View>
+              {selectedVariant && variantLabel ? (
+                <Text style={styles.sheetVariantLabel} numberOfLines={1}>{variantLabel}</Text>
+              ) : null}
+              <Text style={[styles.sheetStockLabel, outOfStock && { color: COLORS.textMuted }]}>
+                {outOfStock
+                  ? 'Out of Stock'
+                  : selectedVariant
+                    ? `${selectedVariant.stock} pieces available`
+                    : 'Select options below'}
+              </Text>
+            </View>
+            <TouchableOpacity style={styles.sheetCloseBtn} onPress={() => setVariantSheetVisible(false)}>
+              <X size={20} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            {/* Variant Dimensions — all rows rendered inline inside the sheet */}
+            {dimensionsWithOptions.map(({ key, label, options, selected, onSelect }) => {
+              if (options.length <= 1) return null;
+              return (
+                <View key={key} style={styles.sheetDimSection}>
+                  <Text style={styles.sheetDimLabel}>
+                    {label}
+                    {selected ? ': ' : ''}
+                    {selected ? <Text style={{ color: COLORS.primary }}>{selected}</Text> : null}
+                  </Text>
+                  <View style={styles.sheetChipsRow}>
+                    {options.map((value) => {
+                      const isSelected = selected === value;
+                      const isAvailable = isOptionAvailable(key, value);
+                      const swatchImage = key === 'color' ? colorImages[value] : null;
+                      if (swatchImage) {
+                        return (
+                          <TouchableOpacity
+                            key={value}
+                            style={[styles.sheetSwatchBtn, !isAvailable && styles.sheetChipDisabled]}
+                            onPress={() => onSelect(value)}
+                            disabled={!isAvailable}
+                          >
+                            <View style={[
+                              styles.sheetSwatchThumbWrap,
+                              isSelected && styles.sheetSwatchThumbSelected,
+                            ]}>
+                              <Image source={{ uri: swatchImage }} style={styles.sheetSwatchThumb} contentFit="cover" />
+                              {isSelected && (
+                                <View style={styles.sheetSwatchCheckBadge}>
+                                  <Check size={9} color="#fff" strokeWidth={3} />
+                                </View>
+                              )}
+                              {!isAvailable && <View style={styles.sheetChipStrike} />}
+                            </View>
+                            <Text
+                              style={[styles.sheetSwatchLabel, isSelected && { color: COLORS.primary, fontWeight: '600' }]}
+                              numberOfLines={1}
+                            >
+                              {value}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      }
+                      return (
+                        <TouchableOpacity
+                          key={value}
+                          style={[
+                            styles.sheetChip,
+                            isSelected && styles.sheetChipSelected,
+                            !isAvailable && styles.sheetChipDisabled,
+                          ]}
+                          onPress={() => onSelect(value)}
+                          disabled={!isAvailable}
+                        >
+                          {isSelected && (
+                            <View style={styles.sheetChipCheckCorner}>
+                              <Check size={8} color="#fff" strokeWidth={3} />
+                            </View>
+                          )}
+                          <Text style={[styles.sheetChipText, isSelected && styles.sheetChipTextSelected]}>
+                            {value}
+                          </Text>
+                          {!isAvailable && <View style={styles.sheetChipStrike} />}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            })}
+
+            {/* Quantity Stepper inside sheet */}
+            <View style={styles.sheetQtyRow}>
+              <Text style={styles.sheetDimLabel}>Quantity</Text>
+              <View style={styles.sheetQtyControl}>
+                <TouchableOpacity
+                  style={styles.sheetQtyBtn}
+                  onPress={() => setQuantity((p) => Math.max(1, p - 1))}
+                >
+                  <Minus size={16} color={quantity <= 1 ? COLORS.textMuted : COLORS.text} />
+                </TouchableOpacity>
+                <Text style={styles.sheetQtyVal}>{quantity}</Text>
+                <TouchableOpacity
+                  style={styles.sheetQtyBtn}
+                  onPress={() => setQuantity((p) => p + 1)}
+                >
+                  <Plus size={16} color={COLORS.text} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+
+          {/* Sheet CTA */}
+          <View style={styles.sheetFooter}>
+            <TouchableOpacity
+              style={[styles.sheetAddToCartBtn, outOfStock && styles.disabledBtn]}
+              onPress={() => handleSheetConfirm('cart')}
+              disabled={outOfStock}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.sheetAddToCartText}>{outOfStock ? 'Sold Out' : 'Add to Cart'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sheetBuyNowBtn, outOfStock && styles.disabledBtn]}
+              onPress={() => handleSheetConfirm('buy')}
+              disabled={outOfStock}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.sheetBuyNowText}>Buy Now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Full-screen image preview — opens on tapping the product image */}
       <Modal visible={previewVisible} animationType="fade" onRequestClose={() => setPreviewVisible(false)}>
@@ -1522,5 +1701,285 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontSize: FONTS.size.md,
     fontWeight: 'bold',
+  },
+
+  // ───────────── Variant Trigger Row ─────────────
+  variantTriggerRow: {
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 14,
+    borderBottomWidth: 8,
+    borderBottomColor: '#F5F5F7',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  variantTriggerLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  variantTriggerSwatches: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  variantTriggerSwatchThumb: {
+    width: 38,
+    height: 38,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  variantTriggerSwatchCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.border,
+  },
+  variantTriggerSwatchSelected: {
+    borderColor: COLORS.primary,
+  },
+  variantTriggerMore: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.textLight,
+    marginLeft: 2,
+  },
+  variantTriggerTitle: {
+    fontSize: FONTS.size.sm,
+    color: COLORS.text,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  variantTriggerSub: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.textLight,
+  },
+
+  // ───────────── Bottom Sheet ─────────────
+  sheetOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  sheetContainer: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '85%',
+    minHeight: '50%',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    gap: SPACING.md,
+  },
+  sheetHeaderImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F7',
+  },
+  sheetPrice: {
+    fontSize: FONTS.size.xl,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginBottom: 2,
+  },
+  sheetOldPrice: {
+    fontSize: FONTS.size.sm,
+    color: COLORS.textMuted,
+    fontWeight: 'normal',
+    textDecorationLine: 'line-through',
+  },
+  sheetVariantLabel: {
+    fontSize: FONTS.size.sm,
+    color: COLORS.textLight,
+    marginBottom: 2,
+  },
+  sheetStockLabel: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.success,
+    fontWeight: '500',
+  },
+  sheetCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F5F5F7',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sheetDimSection: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F7',
+  },
+  sheetDimLabel: {
+    fontSize: FONTS.size.sm,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.sm,
+  },
+  sheetChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  sheetChip: {
+    borderRadius: 6,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  sheetChipSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: 'rgba(185,28,28,0.06)',
+  },
+  sheetChipDisabled: {
+    opacity: 0.4,
+  },
+  sheetChipText: {
+    fontSize: FONTS.size.sm,
+    color: COLORS.text,
+    fontWeight: '500',
+  },
+  sheetChipTextSelected: {
+    color: COLORS.primary,
+    fontWeight: '700',
+  },
+  sheetChipCheckCorner: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 16,
+    height: 16,
+    backgroundColor: COLORS.primary,
+    borderTopLeftRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sheetChipStrike: {
+    position: 'absolute',
+    top: '50%',
+    left: 0,
+    right: 0,
+    height: 1.5,
+    backgroundColor: COLORS.textMuted,
+    transform: [{ rotate: '-20deg' }],
+  },
+  sheetSwatchBtn: {
+    alignItems: 'center',
+    width: 64,
+    gap: 4,
+  },
+  sheetSwatchThumbWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  sheetSwatchThumbSelected: {
+    borderColor: COLORS.primary,
+  },
+  sheetSwatchThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  sheetSwatchCheckBadge: {
+    position: 'absolute',
+    bottom: 3,
+    right: 3,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sheetSwatchLabel: {
+    fontSize: FONTS.size.xs,
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  sheetQtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+  },
+  sheetQtyControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 999,
+    overflow: 'hidden',
+    height: 38,
+  },
+  sheetQtyBtn: {
+    width: 40,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+  },
+  sheetQtyVal: {
+    width: 36,
+    textAlign: 'center',
+    fontSize: FONTS.size.md,
+    fontWeight: '700',
+    color: COLORS.text,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: COLORS.border,
+    lineHeight: 38,
+  },
+  sheetFooter: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  sheetAddToCartBtn: {
+    flex: 1,
+    backgroundColor: COLORS.secondary,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  sheetAddToCartText: {
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: FONTS.size.md,
+  },
+  sheetBuyNowBtn: {
+    flex: 1,
+    backgroundColor: COLORS.primary,
+    borderRadius: 999,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  sheetBuyNowText: {
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: FONTS.size.md,
   },
 });
